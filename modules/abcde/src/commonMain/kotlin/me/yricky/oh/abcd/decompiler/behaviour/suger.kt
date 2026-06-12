@@ -35,11 +35,17 @@ fun IrOp.Expression.replaceReg(reg: FunSimCtx.RegId, replaceTo: FunSimCtx.RegId)
             if (clazz == reg) replaceTo else clazz,
             constructorArgs.map { if (it == reg) replaceTo else it }
         )
-        is IrOp.ObjField.Index -> if (obj == reg) IrOp.ObjField.Index(replaceTo, index) else this
-        is IrOp.ObjField.Name -> if (obj == reg) IrOp.ObjField.Name(replaceTo, name) else this
-        is IrOp.ObjField.Value -> if (obj == reg || value == reg) {
-            IrOp.ObjField.Value(if (obj == reg) replaceTo else obj, if (value == reg) replaceTo else value)
-        } else this
+        is IrOp.ObjField.Index -> if (obj is IrOp.LoadReg && obj.regId == reg) IrOp.ObjField.Index(IrOp.LoadReg(replaceTo), index) else this
+        is IrOp.ObjField.Name -> if (obj is IrOp.LoadReg && obj.regId == reg) IrOp.ObjField.Name(IrOp.LoadReg(replaceTo), name) else this
+        is IrOp.ObjField.Value -> {
+            val objLoadReg = obj as? IrOp.LoadReg
+            if (objLoadReg != null && (objLoadReg.regId == reg || value == reg)) {
+                IrOp.ObjField.Value(
+                    if (objLoadReg.regId == reg) IrOp.LoadReg(replaceTo) else obj,
+                    if (value == reg) replaceTo else value
+                )
+            } else this
+        }
         // Binary expressions
         is IrOp.BiExp.AShr -> IrOp.BiExp.AShr(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
         is IrOp.BiExp.Add -> IrOp.BiExp.Add(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))

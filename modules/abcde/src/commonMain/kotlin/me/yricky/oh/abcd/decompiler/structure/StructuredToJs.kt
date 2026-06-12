@@ -215,9 +215,9 @@ class StructuredToJs(val asm: Asm) {
             is IrOp.LoadReg -> generateRegId(exp.regId)
             is IrOp.NewClass -> "/* newClass */"
             is IrOp.NewInst -> "new ${generateRegId(exp.clazz)}(${exp.constructorArgs.joinToString { generateRegId(it) }})"
-            is IrOp.ObjField.Index -> "${generateRegId(exp.obj)}[${exp.index}]"
-            is IrOp.ObjField.Name -> "${generateRegId(exp.obj)}.${exp.name}"
-            is IrOp.ObjField.Value -> "${generateRegId(exp.obj)}[${generateRegId(exp.value)}]"
+            is IrOp.ObjField.Index -> "${generateExpression(exp.obj)}[${exp.index}]"
+            is IrOp.ObjField.Name -> "${generateExpression(exp.obj)}.${exp.name}"
+            is IrOp.ObjField.Value -> "${generateExpression(exp.obj)}[${generateRegId(exp.value)}]"
             is IrOp.UaExp.Dec -> "${generateExpression(exp.source)} - 1"
             is IrOp.GetModuleNamespace -> "import(${exp.ns.str})"
             is IrOp.UaExp.GetTemplateObject -> "/* getTemplateObject */"

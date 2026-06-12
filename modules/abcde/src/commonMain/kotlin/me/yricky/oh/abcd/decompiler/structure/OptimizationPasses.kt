@@ -362,7 +362,10 @@ object ExpressionPropagationPass : OptimizationPass {
         // 如果表达式读取 ACC，则不适合作为合并目标
         if (expr.read().contains(FunSimCtx.RegId.ACC)) return false
         return when (expr) {
-            is IrOp.ObjField.Name -> true      // obj.method
+            is IrOp.ObjField.Name -> {
+                // 检查 obj 是否也不读取 ACC
+                !expr.obj.read().contains(FunSimCtx.RegId.ACC)
+            }
             is IrOp.ObjField.Index -> true      // obj[index]
             is IrOp.ObjField.Value -> true      // obj[value]
             is IrOp.LoadReg -> true             // variable
@@ -454,29 +457,29 @@ object ExpressionPropagationPass : OptimizationPass {
                 }
             }
             is IrOp.ObjField.Name -> {
-                // 尝试内联 obj
-                val newObj = resolveReg(expr.obj, exprMap)
-                if (newObj != expr.obj) {
-                    IrOp.ObjField.Name(newObj, expr.name)
+                // 内联 obj 表达式
+                val inlinedObj = inlineExpression(expr.obj, exprMap, depth + 1)
+                if (inlinedObj != expr.obj) {
+                    IrOp.ObjField.Name(inlinedObj, expr.name)
                 } else {
                     expr
                 }
             }
             is IrOp.ObjField.Index -> {
-                // 尝试内联 obj
-                val newObj = resolveReg(expr.obj, exprMap)
-                if (newObj != expr.obj) {
-                    IrOp.ObjField.Index(newObj, expr.index)
+                // 内联 obj 表达式
+                val inlinedObj = inlineExpression(expr.obj, exprMap, depth + 1)
+                if (inlinedObj != expr.obj) {
+                    IrOp.ObjField.Index(inlinedObj, expr.index)
                 } else {
                     expr
                 }
             }
             is IrOp.ObjField.Value -> {
-                // 尝试内联 obj 和 value
-                val newObj = resolveReg(expr.obj, exprMap)
+                // 内联 obj 和 value
+                val inlinedObj = inlineExpression(expr.obj, exprMap, depth + 1)
                 val newValue = resolveReg(expr.value, exprMap)
-                if (newObj != expr.obj || newValue != expr.value) {
-                    IrOp.ObjField.Value(newObj, newValue)
+                if (inlinedObj != expr.obj || newValue != expr.value) {
+                    IrOp.ObjField.Value(inlinedObj, newValue)
                 } else {
                     expr
                 }

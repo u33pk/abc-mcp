@@ -281,7 +281,7 @@ sealed interface IrOp {
     }
     class AssignObj(val left: ObjField, override val right: Expression): Assign {
         override fun read(): Sequence<FunSimCtx.RegId> = right.read() + left.read()
-        override fun effected(): Sequence<FunSimCtx.RegId> = right.effected() + left.obj
+        override fun effected(): Sequence<FunSimCtx.RegId> = right.effected() + left.obj.read()
 
         override val leftReg: FunSimCtx.RegId? get() = null
         override fun replaceRight(newValue: Expression): Assign {
@@ -411,13 +411,21 @@ sealed interface IrOp {
         class StrictEq(l: Expression, r: Expression) : BiExp(l, r)
     }
 
-    sealed class ObjField(val obj: FunSimCtx.RegId): Expression {
+    sealed class ObjField(val obj: Expression): Expression {
         override fun read(): Sequence<FunSimCtx.RegId> {
-            return sequenceOf(obj)
+            return obj.read()
         }
-        class Name(obj: FunSimCtx.RegId, val name: String): ObjField(obj)
-        class Index(obj: FunSimCtx.RegId, val index: Int): ObjField(obj)
-        class Value(obj: FunSimCtx.RegId, val value: FunSimCtx.RegId): ObjField(obj){
+        // 向后兼容：接受 RegId 的构造函数
+        constructor(obj: FunSimCtx.RegId) : this(LoadReg(obj))
+        
+        class Name(obj: Expression, val name: String): ObjField(obj) {
+            constructor(obj: FunSimCtx.RegId, name: String) : this(LoadReg(obj), name)
+        }
+        class Index(obj: Expression, val index: Int): ObjField(obj) {
+            constructor(obj: FunSimCtx.RegId, index: Int) : this(LoadReg(obj), index)
+        }
+        class Value(obj: Expression, val value: FunSimCtx.RegId): ObjField(obj) {
+            constructor(obj: FunSimCtx.RegId, value: FunSimCtx.RegId) : this(LoadReg(obj), value)
             override fun read(): Sequence<FunSimCtx.RegId> {
                 return super.read() + sequenceOf(value)
             }
