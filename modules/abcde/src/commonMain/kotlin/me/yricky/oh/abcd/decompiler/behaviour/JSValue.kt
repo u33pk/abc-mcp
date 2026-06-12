@@ -57,29 +57,29 @@ sealed interface JSValue {
 
         private fun asJSValue(asm:Asm, literal: LiteralArray.Literal):JSValue {
             return when(literal){
-                is LiteralArray.Literal.Accessor -> TODO()
+                is LiteralArray.Literal.Accessor -> Undefined // getter/setter accessor marker
                 is LiteralArray.Literal.Bool -> if(literal.value == 0x00.toByte()) False else True
-                is LiteralArray.Literal.BuiltinTypeIndex -> TODO()
+                is LiteralArray.Literal.BuiltinTypeIndex -> Undefined // TODO
                 is LiteralArray.Literal.F32 -> Number(literal.value)
                 is LiteralArray.Literal.F64 -> Number(literal.value)
                 is LiteralArray.Literal.I32 -> Number(literal.value)
-                is LiteralArray.Literal.LiteralBufferIndex -> TODO()
-                is LiteralArray.Literal.MethodAffiliate -> TODO()
+                is LiteralArray.Literal.LiteralBufferIndex -> Undefined // TODO
+                is LiteralArray.Literal.MethodAffiliate -> Undefined // TODO
                 is LiteralArray.Literal.NullValue -> Null
-                is LiteralArray.Literal.TagValue -> TODO()
-                is LiteralArray.Literal.ArrayF32 -> TODO()
-                is LiteralArray.Literal.ArrayF64 -> TODO()
-                is LiteralArray.Literal.ArrayI16 -> TODO()
-                is LiteralArray.Literal.ArrayI32 -> TODO()
-                is LiteralArray.Literal.ArrayI64 -> TODO()
-                is LiteralArray.Literal.ArrayI8 -> TODO()
+                is LiteralArray.Literal.TagValue -> Undefined // TODO
+                is LiteralArray.Literal.ArrayF32 -> Undefined // TODO
+                is LiteralArray.Literal.ArrayF64 -> Undefined // TODO
+                is LiteralArray.Literal.ArrayI16 -> Undefined // TODO
+                is LiteralArray.Literal.ArrayI32 -> Undefined // TODO
+                is LiteralArray.Literal.ArrayI64 -> Undefined // TODO
+                is LiteralArray.Literal.ArrayI8 -> Undefined // TODO
                 is LiteralArray.Literal.ArrayStr -> ArrInst(literal.get(asm.code.abc).map { Str(it) })
-                is LiteralArray.Literal.ArrayU1 -> TODO()
-                is LiteralArray.Literal.ArrayU16 -> TODO()
-                is LiteralArray.Literal.ArrayU32 -> TODO()
-                is LiteralArray.Literal.ArrayU64 -> TODO()
-                is LiteralArray.Literal.ArrayU8 -> TODO()
-                is LiteralArray.Literal.LiteralArr -> TODO()
+                is LiteralArray.Literal.ArrayU1 -> Undefined // TODO
+                is LiteralArray.Literal.ArrayU16 -> Undefined // TODO
+                is LiteralArray.Literal.ArrayU32 -> Undefined // TODO
+                is LiteralArray.Literal.ArrayU64 -> Undefined // TODO
+                is LiteralArray.Literal.ArrayU8 -> Undefined // TODO
+                is LiteralArray.Literal.LiteralArr -> Undefined // TODO
                 is LiteralArray.Literal.LiteralMethod -> Function(literal.get(asm.code.abc))
 //                is LiteralArray.Literal.AsyncGeneratorMethod -> TODO()
 //                is LiteralArray.Literal.GeneratorMethod -> TODO()

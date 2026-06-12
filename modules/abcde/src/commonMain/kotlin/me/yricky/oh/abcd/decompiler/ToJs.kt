@@ -45,6 +45,7 @@ class ToJs(val asm: Asm) {
                     IrOp.Throw.Acc -> "throw ${toJS(FunSimCtx.RegId.ACC)};"
                     is IrOp.Throw.Error -> "throw Error(${op.msg});"
                     is IrOp.DeleteProp -> "delete ${toJS(op.obj)}[${toJS(op.prop)}];"
+                    is IrOp.DefineGetterSetter -> "Object.defineProperty(${toJS(op.obj)}, ${toJS(op.prop)}, {get: ${toJS(op.getter)}, set: ${toJS(op.setter)}});"
                 }
             }
 

@@ -175,6 +175,7 @@ class StructuredToJs(val asm: Asm) {
                     IrOp.Throw.Acc -> "throw ${generateRegId(FunSimCtx.RegId.ACC)};"
                     is IrOp.Throw.Error -> "throw Error(${op.msg});"
                     is IrOp.DeleteProp -> "delete ${generateRegId(op.obj)}[${generateRegId(op.prop)}];"
+                    is IrOp.DefineGetterSetter -> "Object.defineProperty(${generateRegId(op.obj)}, ${generateRegId(op.prop)}, {get: ${generateRegId(op.getter)}, set: ${generateRegId(op.setter)}});"
                 }
             }
         }

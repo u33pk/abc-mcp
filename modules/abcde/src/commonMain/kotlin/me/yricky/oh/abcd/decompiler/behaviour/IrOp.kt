@@ -250,6 +250,13 @@ sealed interface IrOp {
                     LoadReg.acc
                 )
 
+                0xbc.toByte() -> DefineGetterSetter(
+                    regId(item.opUnits[1]),
+                    regId(item.opUnits[2]),
+                    regId(item.opUnits[3]),
+                    regId(item.opUnits[4])
+                )
+
                 else -> UnImplemented(item)
             }
         }
@@ -298,6 +305,15 @@ sealed interface IrOp {
     class DeleteProp(val obj: FunSimCtx.RegId, val prop: FunSimCtx.RegId): Statement{
         override fun effected(): Sequence<FunSimCtx.RegId> = sequenceOf(obj)
         override fun read(): Sequence<FunSimCtx.RegId> = sequenceOf(obj,prop)
+    }
+    class DefineGetterSetter(
+        val obj: FunSimCtx.RegId,
+        val prop: FunSimCtx.RegId,
+        val getter: FunSimCtx.RegId,
+        val setter: FunSimCtx.RegId
+    ): Statement {
+        override fun effected(): Sequence<FunSimCtx.RegId> = sequenceOf(obj)
+        override fun read(): Sequence<FunSimCtx.RegId> = sequenceOf(obj, prop, getter, setter)
     }
 
     class Jump(val offset: Int): Statement
