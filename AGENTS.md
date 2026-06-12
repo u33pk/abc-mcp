@@ -1,18 +1,21 @@
-# AGENTS.md - ABCDE 项目指南
+<!-- From: /Users/vv/project/abc-mcp/AGENTS.md -->
+# AGENTS.md - ABCDE MCP 项目指南
 
-## 项目概述
+## 项目背景
 
-ABCDE 是一个 OpenHarmony 逆向工具包，用于解析和反编译方舟字节码文件（`.abc`）。
+本项目 **ABCDE MCP** 是基于 [Yricky/ABCDE](https://github.com/Yricky/ABCDE) 的 OpenHarmony 逆向工具链。
 
-### 核心目标
-构建一个 **MCP 服务**，供 LLM 调用，实现鸿蒙应用的反编译和分析能力。
+- **原项目作者**：Yricky
+- **原仓库地址**：[https://github.com/Yricky/ABCDE](https://github.com/Yricky/ABCDE)
+- **本项目定位**：在 ABCDE 基础上封装 **MCP（Model Context Protocol）服务**，为 LLM 提供鸿蒙应用的反编译与分析能力。
 
-### 技术栈
-- **语言**: Kotlin Multiplatform
-- **GUI**: Jetpack Compose Desktop（非核心）
-- **构建**: Gradle (Kotlin DSL)
+## 技术栈
 
----
+- **语言**：Kotlin Multiplatform（核心为 JVM）
+- **GUI**：Jetpack Compose Desktop（非核心）
+- **构建**：Gradle (Kotlin DSL)
+- **Kotlin 版本**：2.0.21
+- **Gradle 版本**：8.6
 
 ## 项目结构
 
@@ -36,16 +39,11 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 ├── literal/                     # 字面量数组
 └── decompiler/                  # 反编译器
     ├── behaviour/               # IR 中间表示（IrOp）
-    │   ├── IrOp.kt              # IR 节点定义
-    │   ├── FunSimCtx.kt         # 寄存器定义（ACC, GLOBAL, THIS 等）
-    │   └── suger.kt             # 扩展函数（replaceReg 等）
     ├── CodeSegment.kt           # CFG 基本块定义
-    └── structure/               # 新结构化分析
+    └── structure/               # 结构化分析
         ├── RegionGraph.kt       # 轻量级有向图
-        ├── Region.kt            # 区域节点定义
         ├── DominatorGraph.kt    # 支配树
         ├── LoopFinder.kt        # 循环检测
-        ├── RegionGraphBuilder.kt # CFG → RegionGraph
         ├── StructureAnalysis.kt # 结构化分析核心
         ├── StructuredDecompiler.kt # 统一入口
         ├── StructuredToJs.kt    # 代码生成器
@@ -54,95 +52,56 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
         └── statement/           # 语句类型
 ```
 
----
+## JDK 支持矩阵
 
-## 已实现功能
+| JDK 版本 | 状态 | 说明 |
+|---------|------|------|
+| **JDK 17** | ✅ 推荐 | 项目原生 `jvmToolchain(17)` 配置 |
+| **JDK 21** | ✅ 可用 | 需将所有模块的 `jvmToolchain(17)` 改为 `jvmToolchain(21)` |
+| **JDK 25** | ❌ 不支持 | Gradle 8.6 内置 Kotlin 无法识别 Java 25 |
+| **JDK 26** | ❌ 不支持 | Gradle 8.6 内置 Kotlin 无法识别 Java 26 |
 
-### 1. 结构化分析（从 xpanda 移植）
+> 当前 Kotlin 2.0.21 最高支持到 **JVM target 22**。若需支持 JDK 25/26，必须升级 Gradle 至 8.12+、Kotlin 至 2.1.x+。
 
-xpanda 是另一个鸿蒙反编译器（Java 实现，已停止维护）。我们将其核心算法移植到了 ABCDE。
+## 常用构建命令
 
-#### 移植的组件
-1. **DominatorGraph** - 支配树计算（Cooper-Harvey-Kennedy 算法）
-2. **LoopFinder** - 基于支配关系的循环检测
-3. **StructureAnalysis** - 控制流规约算法（if/while/do-while/逻辑短路）
-4. **RegionGraph** - 轻量级有向图（替代 Guava MutableValueGraph）
+```bash
+# 启动 MCP 服务
+./gradlew :modules:mcp:jvmRun
 
-### 2. LLVM 风格优化
+# 构建 MCP 可运行 fat jar（包含所有依赖）
+./gradlew :modules:mcp:fatJar
 
-| Pass | 说明 | 状态 |
-|------|------|------|
-| `AlgebraicSimplificationPass` | 代数化简（常量折叠、恒等变换） | ✅ |
-| `CopyPropagationPass` | 拷贝传播 | ✅ |
-| `DeadCodeEliminationPass` | 死代码消除 | ✅ |
-| `AccCopyPropagationPass` | ACC 拷贝传播 | ✅ |
-| `ExpressionPropagationPass` | 表达式传播 | ✅ |
+# 构建桌面 GUI 的 UberJar
+./gradlew :abcdecoder:packageReleaseUberJarForCurrentOS
 
-### 3. 函数调用合并
-
-检测并合并连续的 ACC 赋值和 CallAcc 调用：
-```javascript
-// 优化前
-_acc_ = AtkTsGlobal.print;
-_acc_ = this._acc_(_acc_);
-
-// 优化后
-_acc_ = AtkTsGlobal.print(_acc_);
+# 发布到本地 Maven
+./gradlew publishToMavenLocal
 ```
-
-支持嵌套属性访问：
-```javascript
-// console.log(i*j) 合并为
-_acc_ = AtkTsGlobal.console.log(_acc_);
-```
-
-### 4. 函数名还原
-
-解码方舟编译器的内部编码：
-- `#*#foo` → `function foo`
-- `#~A=#A` → `constructor`
-- `#~A>#loop` → `loop`
-- `#~A<#foo` → `static foo`
-
-### 5. MCP 服务
-
-提供 13 个工具供 LLM 调用，支持 ABC 解析、HAP 包分析、资源搜索等。
-
----
 
 ## 测试
 
-### 测试文件
-- 源码：`/home/orz/project/unitTest/`
-- ABC 文件：`/home/orz/project/unitTest/out/`
-
-### 运行测试
 ```bash
-# 运行所有测试
+# 运行所有反编译测试
 ./gradlew :modules:abcde:jvmTest --tests "me.yricky.oh.abcd.decompiler.structure.StructuredDecompilerTest.testAllAbcFiles"
 
 # 运行单个文件测试
 ./gradlew :modules:abcde:jvmTest --tests "me.yricky.oh.abcd.decompiler.structure.StructuredDecompilerTest.testSpecificFile"
 ```
 
-### 测试结果
-- 总方法数：204
-- 成功：204（100%）
-- 失败：0
-
----
+测试文件路径（参考）：
+- 源码：`/home/orz/project/unitTest/`
+- ABC 文件：`/home/orz/project/unitTest/out/`
 
 ## MCP 服务
 
 ### 模块位置
 `modules/mcp/`
 
-### 启动方式
-```bash
-./gradlew :modules:mcp:jvmRun
-```
+### 入口
+`me.yricky.oh.mcp.MainKt`
 
-### 暴露的 Tools
+### 暴露的 Tools（13 个）
 
 #### ABC 字节码工具
 | Tool | 功能 |
@@ -169,7 +128,70 @@ _acc_ = AtkTsGlobal.console.log(_acc_);
 | `search_resources` | 搜索资源（按名称、类型） |
 | `resolve_resource` | 解析 `$string:app_name` 等资源引用 |
 
----
+### fat jar 构建说明
+
+`modules/mcp/build.gradle.kts` 中已添加 `fatJar` task，用于打包所有 runtime 依赖：
+
+```kotlin
+tasks.register<Jar>("fatJar") {
+    archiveClassifier.set("fat")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from({
+        configurations["jvmRuntimeClasspath"].map { if (it.isDirectory) it else zipTree(it) }
+    })
+    from({
+        tasks["jvmJar"].outputs.files.singleFile.let { if (it.isDirectory) it else zipTree(it) }
+    })
+    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
+    manifest {
+        attributes["Main-Class"] = "me.yricky.oh.mcp.MainKt"
+    }
+}
+```
+
+输出位置：`modules/mcp/build/libs/mcp-*-fat.jar`
+
+## 反编译器架构
+
+### 已移植的核心组件（来自 xpanda）
+
+xpanda 是另一个已停止维护的鸿蒙反编译器（Java 实现）。本项目移植了其核心算法：
+
+1. **DominatorGraph** - 支配树计算（Cooper-Harvey-Kennedy 算法）
+2. **LoopFinder** - 基于支配关系的循环检测
+3. **StructureAnalysis** - 控制流规约算法（if/while/do-while/逻辑短路）
+4. **RegionGraph** - 轻量级有向图（替代 Guava MutableValueGraph）
+
+### LLVM 风格优化 Pass
+
+| Pass | 说明 | 状态 |
+|------|------|------|
+| `AlgebraicSimplificationPass` | 代数化简（常量折叠、恒等变换） | ✅ |
+| `CopyPropagationPass` | 拷贝传播 | ✅ |
+| `DeadCodeEliminationPass` | 死代码消除 | ✅ |
+| `AccCopyPropagationPass` | ACC 拷贝传播 | ✅ |
+| `ExpressionPropagationPass` | 表达式传播 | ✅ |
+
+### 函数调用合并
+
+检测并合并连续的 ACC 赋值和 CallAcc 调用：
+
+```javascript
+// 优化前
+_acc_ = AtkTsGlobal.print;
+_acc_ = this._acc_(_acc_);
+
+// 优化后
+_acc_ = AtkTsGlobal.print(_acc_);
+```
+
+### 函数名还原
+
+解码方舟编译器的内部编码：
+- `#*#foo` → `function foo`
+- `#~A=#A` → `constructor`
+- `#~A>#loop` → `loop`
+- `#~A<#foo` → `static foo`
 
 ## 待完成任务
 
@@ -182,20 +204,7 @@ _acc_ = AtkTsGlobal.console.log(_acc_);
 4. **重复 Load 消除** - 消除冗余的对象字段读取
 5. **交叉引用分析** - 查找方法/字段的调用者
 
----
+## 修改约定
 
-## 从 xpanda 移植的组件
-
-xpanda 是另一个鸿蒙反编译器（Java 实现，已停止维护）。我们将其核心算法移植到了 ABCDE。
-
-### 移植的组件
-1. **DominatorGraph** - 支配树计算（Cooper-Harvey-Kennedy 算法）
-2. **LoopFinder** - 基于支配关系的循环检测
-3. **StructureAnalysis** - 控制流规约算法（if/while/do-while/逻辑短路）
-4. **RegionGraph** - 轻量级有向图（替代 Guava MutableValueGraph）
-
-### 未移植的组件
-- xpanda 的文件解析层（ABCDE 已有 AbcBuf）
-- xpanda 的指令定义（ABCDE 使用官方 isa.yaml）
-- xpanda 的 GraalJS 代码生成（我们用 Kotlin 字符串拼接）
-- xpanda 的 Node.js 代码简化（我们不需要）
+- 若修改了 AGENTS.md 中提到的模块结构、构建配置、工具列表、JDK 支持情况等内容，需同步更新本文件。
+- 保持对原项目 [Yricky/ABCDE](https://github.com/Yricky/ABCDE) 的致谢和链接。

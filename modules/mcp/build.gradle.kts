@@ -18,7 +18,7 @@ kotlin {
             mainClass.set("me.yricky.oh.mcp.MainKt")
         }
     }
-    
+
     sourceSets {
         jvmMain {
             dependencies {
@@ -29,5 +29,27 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
             }
         }
+    }
+}
+
+tasks.register<Jar>("fatJar") {
+    group = "build"
+    description = "Assembles a fat jar containing all runtime dependencies"
+    dependsOn("jvmJar")
+
+    archiveClassifier.set("fat")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from({
+        configurations["jvmRuntimeClasspath"].map { if (it.isDirectory) it else zipTree(it) }
+    })
+    from({
+        tasks["jvmJar"].outputs.files.singleFile.let { if (it.isDirectory) it else zipTree(it) }
+    })
+
+    exclude("META-INF/*.RSA", "META-INF/*.SF", "META-INF/*.DSA")
+
+    manifest {
+        attributes["Main-Class"] = "me.yricky.oh.mcp.MainKt"
     }
 }
