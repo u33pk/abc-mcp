@@ -299,6 +299,9 @@ sealed interface IrOp {
         override fun effected(): Sequence<FunSimCtx.RegId> = condition.effected()
     }
     class Return private constructor(val hasValue: Boolean): Statement{
+        override fun read(): Sequence<FunSimCtx.RegId> = 
+            if (hasValue) sequenceOf(FunSimCtx.RegId.ACC) else emptySequence()
+        override fun effected(): Sequence<FunSimCtx.RegId> = emptySequence()
         companion object{
             val ReturnUndefined = Return(false)
             val ReturnAcc = Return(true)

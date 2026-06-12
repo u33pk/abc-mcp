@@ -172,8 +172,19 @@ class ToJs(val asm: Asm) {
             }
             is CodeSegment.LinearPattern -> {
                 val sb = StringBuilder()
-                sb.append(toJS(linear.l1,indent))
-                sb.append(toJS(linear.l2,indent))
+                // 收集所有指令并统一优化
+                val allOps = mutableListOf<IrOp>()
+                collectOps(linear, allOps)
+                if(enableOptimize && allOps.isNotEmpty()){
+                    optimize(allOps.asSequence()).forEach { op ->
+                        sb.append("  ".repeat(indent))
+                        sb.append(toJS(op))
+                        sb.append("\n")
+                    }
+                } else {
+                    sb.append(toJS(linear.l1,indent))
+                    sb.append(toJS(linear.l2,indent))
+                }
                 sb.toString()
             }
             is CodeSegment.LoopBreakPattern -> {
@@ -204,6 +215,24 @@ class ToJs(val asm: Asm) {
             }
 
             is CodeSegment.JumpMark -> ""
+        }
+    }
+
+    /**
+     * 收集 LinearPattern 中的所有指令
+     */
+    private fun collectOps(linear: CodeSegment.AsLinear, ops: MutableList<IrOp>) {
+        when (linear) {
+            is CodeSegment.LinearPattern -> {
+                collectOps(linear.l1, ops)
+                collectOps(linear.l2, ops)
+            }
+            is CodeSegment.Linear -> {
+                linear.forEach { ops.add(it.irOp) }
+            }
+            else -> {
+                // 其他类型不收集
+            }
         }
     }
 
@@ -244,33 +273,27 @@ class ToJs(val asm: Asm) {
             }
         }
 
-        sealed class OptimizableCase{
-            abstract fun judge(op: IrOp):Boolean
-
-            object AssignToAcc:OptimizableCase(){
-                override fun judge(op: IrOp): Boolean {
-                    return op is IrOp.Assign && op.assignLeftAcc
-                }
-            }
-        }
-
-        /**
-         * 对于以下逻辑片段：
-         * _acc_ = xxx; (line1)
-         * yyy = _acc_; (line2)
-         * _acc_ = zzz; (line3)
-         *
-         * 可将其化简为：
-         * yyy = xxx;
-         * _acc_ = zzz; （这一行可以作为本化简逻辑的首行进一步尝试化简）
-         *
-         * @param buf Ir片段，至少包含line1 line2 line3
-         * @param iter 字节码迭代器，其[Iterator.next]返回应为line2对应的字节码对象
-         */
         fun trySimplify3Assign(
             buf: MutableList<IrOp>,
             iter: Iterator<IrOp>,
         ): Boolean{
+            // 先尝试 2 条指令的优化：_acc_ = xxx; yyy = _acc_; -> yyy = xxx;
+            if(buf.size >= 2){
+                val op0 = buf[0]
+                val op1 = buf[1]
+                val cond0LeftAcc = op0 is IrOp.Assign && op0.leftReg == FunSimCtx.RegId.ACC
+                val cond0RightNoAcc = op0 is IrOp.Assign && !(op0.right.effected().contains(FunSimCtx.RegId.ACC) || op0.right.read().contains(FunSimCtx.RegId.ACC))
+                val cond1RightAcc = op1 is IrOp.Assign && (op1.right as? IrOp.LoadReg)?.regId == FunSimCtx.RegId.ACC
+                val cond1LeftNoAcc = op1 is IrOp.Assign && op1.leftReg != FunSimCtx.RegId.ACC
+                
+                if(cond0LeftAcc && cond0RightNoAcc && cond1RightAcc && cond1LeftNoAcc){
+                    val firstOp = buf.removeAt(0) as IrOp.Assign
+                    buf[0] = (buf[0] as IrOp.Assign).replaceRight(firstOp.right)
+                    return true
+                }
+            }
+            
+            // 再尝试 3 条指令的优化
             while (buf.size < 3 && iter.hasNext()){
                 buf.add(iter.next())
             }
@@ -286,6 +309,16 @@ class ToJs(val asm: Asm) {
                 return true
             } else {
                 return false
+            }
+        }
+
+        sealed class OptimizableCase{
+            abstract fun judge(op: IrOp):Boolean
+
+            object AssignToAcc:OptimizableCase(){
+                override fun judge(op: IrOp): Boolean {
+                    return op is IrOp.Assign && op.assignLeftAcc
+                }
             }
         }
     }

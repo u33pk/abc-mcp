@@ -16,47 +16,58 @@ val IrOp.assignRightContainsAcc: Boolean get() = (this is IrOp.Assign) &&
         (right.effected().contains(FunSimCtx.RegId.ACC) || right.read().contains(FunSimCtx.RegId.ACC))
 
 fun IrOp.Expression.replaceReg(reg: FunSimCtx.RegId, replaceTo: FunSimCtx.RegId): IrOp.Expression {
+    if (reg == replaceTo) return this
     return when (this) {
         is IrOp.NoRegExpression -> this
-        is IrOp.CallAcc -> TODO()
-        is IrOp.DynamicImport -> if (reg == regId) IrOp.DynamicImport(replaceTo) else this
-        is IrOp.LoadReg -> if (reg == regId) IrOp.LoadReg(replaceTo) else this
+        is IrOp.CallAcc -> IrOp.CallAcc(
+            args.map { if (it == reg) replaceTo else it },
+            overrideThis?.let { if (it == reg) replaceTo else it }
+        )
+        is IrOp.DynamicImport -> if (regId == reg) IrOp.DynamicImport(replaceTo) else this
+        is IrOp.LoadReg -> if (regId == reg) IrOp.LoadReg(replaceTo) else this
         is IrOp.NewClass -> if (parent == reg) IrOp.NewClass(constructor, fields, replaceTo) else this
-        is IrOp.NewInst -> TODO()
-        is IrOp.ObjField.Index -> if (obj == reg) IrOp.ObjField.Index(reg, index) else this
-        is IrOp.ObjField.Name -> if (obj == reg) IrOp.ObjField.Name(reg, name) else this
-        is IrOp.ObjField.Value -> TODO()
-        is IrOp.BiExp.AShr -> TODO()
-        is IrOp.BiExp.Add -> TODO()
-        is IrOp.BiExp.And -> TODO()
-        is IrOp.BiExp.Div -> TODO()
-        is IrOp.BiExp.Eq -> TODO()
-        is IrOp.BiExp.Exp -> TODO()
-        is IrOp.BiExp.GEq -> TODO()
-        is IrOp.BiExp.Ge -> TODO()
-        is IrOp.BiExp.InstOf -> TODO()
-        is IrOp.BiExp.IsIn -> TODO()
-        is IrOp.BiExp.LEq -> TODO()
-        is IrOp.BiExp.Less -> TODO()
-        is IrOp.BiExp.Mod -> TODO()
-        is IrOp.BiExp.Mul -> TODO()
-        is IrOp.BiExp.NEq -> TODO()
-        is IrOp.BiExp.Or -> TODO()
-        is IrOp.BiExp.Shl -> TODO()
-        is IrOp.BiExp.Shr -> TODO()
-        is IrOp.BiExp.StrictEq -> TODO()
-        is IrOp.BiExp.StrictNEq -> TODO()
-        is IrOp.BiExp.Sub -> TODO()
-        is IrOp.BiExp.Xor -> TODO()
-        is IrOp.UaExp.Dec -> TODO()
-        is IrOp.UaExp.GetTemplateObject -> TODO()
-        is IrOp.UaExp.Inc -> TODO()
-        is IrOp.UaExp.IsFalse -> TODO()
-        is IrOp.UaExp.IsTrue -> TODO()
-        is IrOp.UaExp.Neg -> TODO()
-        is IrOp.UaExp.Not -> TODO()
-        is IrOp.UaExp.ToNumber -> TODO()
-        is IrOp.UaExp.ToNumeric -> TODO()
-        is IrOp.UaExp.TypeOf -> TODO()
+        is IrOp.NewInst -> IrOp.NewInst(
+            if (clazz == reg) replaceTo else clazz,
+            constructorArgs.map { if (it == reg) replaceTo else it }
+        )
+        is IrOp.ObjField.Index -> if (obj == reg) IrOp.ObjField.Index(replaceTo, index) else this
+        is IrOp.ObjField.Name -> if (obj == reg) IrOp.ObjField.Name(replaceTo, name) else this
+        is IrOp.ObjField.Value -> if (obj == reg || value == reg) {
+            IrOp.ObjField.Value(if (obj == reg) replaceTo else obj, if (value == reg) replaceTo else value)
+        } else this
+        // Binary expressions
+        is IrOp.BiExp.AShr -> IrOp.BiExp.AShr(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Add -> IrOp.BiExp.Add(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.And -> IrOp.BiExp.And(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Div -> IrOp.BiExp.Div(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Eq -> IrOp.BiExp.Eq(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Exp -> IrOp.BiExp.Exp(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.GEq -> IrOp.BiExp.GEq(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Ge -> IrOp.BiExp.Ge(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.InstOf -> IrOp.BiExp.InstOf(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.IsIn -> IrOp.BiExp.IsIn(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.LEq -> IrOp.BiExp.LEq(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Less -> IrOp.BiExp.Less(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Mod -> IrOp.BiExp.Mod(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Mul -> IrOp.BiExp.Mul(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.NEq -> IrOp.BiExp.NEq(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Or -> IrOp.BiExp.Or(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Shl -> IrOp.BiExp.Shl(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Shr -> IrOp.BiExp.Shr(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.StrictEq -> IrOp.BiExp.StrictEq(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.StrictNEq -> IrOp.BiExp.StrictNEq(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Sub -> IrOp.BiExp.Sub(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        is IrOp.BiExp.Xor -> IrOp.BiExp.Xor(l.replaceReg(reg, replaceTo), r.replaceReg(reg, replaceTo))
+        // Unary expressions
+        is IrOp.UaExp.Dec -> IrOp.UaExp.Dec(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.GetTemplateObject -> IrOp.UaExp.GetTemplateObject(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.Inc -> IrOp.UaExp.Inc(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.IsFalse -> IrOp.UaExp.IsFalse(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.IsTrue -> IrOp.UaExp.IsTrue(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.Neg -> IrOp.UaExp.Neg(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.Not -> IrOp.UaExp.Not(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.ToNumber -> IrOp.UaExp.ToNumber(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.ToNumeric -> IrOp.UaExp.ToNumeric(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.TypeOf -> IrOp.UaExp.TypeOf(source.replaceReg(reg, replaceTo))
     }
 }
