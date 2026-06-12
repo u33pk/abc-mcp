@@ -1,5 +1,6 @@
 package me.yricky.oh.abcd.decompiler
 
+import me.yricky.oh.abcd.cfm.AbcMethod
 import me.yricky.oh.abcd.cfm.argsStr
 import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.JSValue
@@ -18,7 +19,8 @@ class ToJs(val asm: Asm) {
     fun toJS(enableOptimize: Boolean = true):String{
         val fc = FunctionDecompilerContext(enableOptimize)
         val sb = StringBuilder()
-        sb.append("function ").append(asm.code.method.name).append(asm.code.method.argsStr()).append("{\n")
+        val methodName = decodeMethodName(asm.code.method)
+        sb.append("function ").append(methodName).append(asm.code.method.argsStr()).append("{\n")
         sb.append(fc.toJS(CodeSegment.genLinear(asm),1))
         sb.append("}")
         return ("${fc.imports.joinToString(separator = ";\n") { it.toString() }}\n" +
@@ -122,7 +124,10 @@ class ToJs(val asm: Asm) {
             is JSValue.ClassObj -> TODO("尚未实现的toJS操作")
             is JSValue.Error -> "Error(...)"
             JSValue.False -> "false"
-            is JSValue.Function -> "function ${jsValue.method.name}()"
+            is JSValue.Function -> {
+                val m = jsValue.method
+                if (m is AbcMethod) "function ${decodeMethodName(m)}()" else "function ${m.name}()"
+            }
             JSValue.Hole -> "undefined /* hole */"
             JSValue.Infinity -> "infinity"
             JSValue.Nan -> "NaN"
@@ -321,6 +326,20 @@ class ToJs(val asm: Asm) {
                 override fun judge(op: IrOp): Boolean {
                     return op is IrOp.Assign && op.assignLeftAcc
                 }
+            }
+        }
+    }
+
+    companion object {
+        /**
+         * 解码方法名为可读格式
+         */
+        fun decodeMethodName(method: AbcMethod): String {
+            val scopeInfo = AbcMethod.ScopeInfo.parseFromMethod(method)
+            return if (scopeInfo != null) {
+                scopeInfo.decorateMethodName(method)
+            } else {
+                method.name
             }
         }
     }

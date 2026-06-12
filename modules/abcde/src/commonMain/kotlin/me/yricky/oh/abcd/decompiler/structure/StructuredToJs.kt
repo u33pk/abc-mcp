@@ -1,5 +1,6 @@
 package me.yricky.oh.abcd.decompiler.structure
 
+import me.yricky.oh.abcd.cfm.AbcMethod
 import me.yricky.oh.abcd.cfm.argsStr
 import me.yricky.oh.abcd.decompiler.CodeSegment
 import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
@@ -10,6 +11,22 @@ import me.yricky.oh.abcd.decompiler.structure.statement.WhileStatement
 import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.abcd.isa.asmName
 import me.yricky.oh.abcd.literal.ModuleLiteralArray
+
+/**
+ * 解码方法名为可读格式
+ * #*#foo → foo
+ * #~A=#A → constructor
+ * #~A>#loop → loop
+ * #~A<#foo → foo
+ */
+fun decodeMethodName(method: AbcMethod): String {
+    val scopeInfo = AbcMethod.ScopeInfo.parseFromMethod(method)
+    return if (scopeInfo != null) {
+        scopeInfo.decorateMethodName(method)
+    } else {
+        method.name
+    }
+}
 
 /**
  * 基于结构化分析的代码生成器
@@ -25,8 +42,9 @@ class StructuredToJs(val asm: Asm) {
     fun generate(region: Region): String {
         val sb = StringBuilder()
         
-        // 生成函数头
-        sb.append("function ${asm.code.method.name}${asm.code.method.argsStr()} {\n")
+        // 生成函数头（使用解码后的方法名）
+        val methodName = decodeMethodName(asm.code.method)
+        sb.append("function $methodName${asm.code.method.argsStr()} {\n")
         
         // 生成函数体
         sb.append(generateRegion(region, 1))
@@ -262,7 +280,10 @@ class StructuredToJs(val asm: Asm) {
             is me.yricky.oh.abcd.decompiler.behaviour.JSValue.ClassObj -> "/* classObj */"
             is me.yricky.oh.abcd.decompiler.behaviour.JSValue.Error -> "Error(...)"
             me.yricky.oh.abcd.decompiler.behaviour.JSValue.False -> "false"
-            is me.yricky.oh.abcd.decompiler.behaviour.JSValue.Function -> "function ${jsValue.method.name}()"
+            is me.yricky.oh.abcd.decompiler.behaviour.JSValue.Function -> {
+                val m = jsValue.method
+                if (m is AbcMethod) "function ${decodeMethodName(m)}()" else "function ${m.name}()"
+            }
             me.yricky.oh.abcd.decompiler.behaviour.JSValue.Hole -> "undefined /* hole */"
             me.yricky.oh.abcd.decompiler.behaviour.JSValue.Infinity -> "Infinity"
             me.yricky.oh.abcd.decompiler.behaviour.JSValue.Nan -> "NaN"

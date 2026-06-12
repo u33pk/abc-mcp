@@ -108,7 +108,8 @@ class AbcMethod(abc: AbcBuf, offset: Int) :MethodItem(abc, offset), SizeInBuf.Ex
 
             const val ANONYMOUS_NAME = "[ANONYMOUS]"
 
-            val scopeRegex = Regex("(#([~><=*&%](@[0-9a-fA-F]+)?(\\^[0-9a-fA-F]+)?)*[~><=*&%]#).*")
+            // 修改正则以匹配层名称（标签后可跟任意字符直到下一个标签/@/^/#）
+            val scopeRegex = Regex("(#([~><=*&%][^~><=*&%@^#]*(@[0-9a-fA-F]+)?(\\^[0-9a-fA-F]+)?)*[~><=*&%]#).*")
 
             fun parseFromMethod(method:AbcMethod):ScopeInfo?{
                 return scopeRegex.find(method.name)?.let {
