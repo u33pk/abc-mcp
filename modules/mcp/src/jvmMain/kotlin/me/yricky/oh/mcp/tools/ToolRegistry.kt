@@ -7,6 +7,7 @@ class ToolRegistry(private val sessionManager: SessionManager) {
     private val tools = mutableMapOf<String, Tool>()
 
     init {
+        // ABC tools
         register(OpenAbcTool(sessionManager))
         register(ListClassesTool(sessionManager))
         register(GetClassDetailTool(sessionManager))
@@ -15,6 +16,13 @@ class ToolRegistry(private val sessionManager: SessionManager) {
         register(SearchStringsTool(sessionManager))
         register(DisassembleMethodTool(sessionManager))
         register(GetMethodInfoTool(sessionManager))
+        // HAP tools
+        register(OpenHapTool())
+        register(GetHapManifestTool())
+        register(GetObfuscationMapTool())
+        // Resource tools
+        register(SearchResourcesTool())
+        register(ResolveResourceTool())
     }
 
     private fun register(tool: Tool) {
