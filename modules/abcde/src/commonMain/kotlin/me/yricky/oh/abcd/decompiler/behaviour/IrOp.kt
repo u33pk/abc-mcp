@@ -137,6 +137,9 @@ sealed interface IrOp {
                 0x44.toByte() -> AssignReg(regId(item.opUnits[1]), regId(item.opUnits[2]).ld())
                 0x45.toByte() -> AssignReg(regId(item.opUnits[1]), regId(item.opUnits[2]).ld())
 
+                0x47.toByte() -> AssignObj(ObjField.Name(FunSimCtx.RegId.GLOBAL, (item.ins.format[2] as InstFmt.SId).getString(item)), LoadReg.acc) // stconsttoglobalrecord
+                0x48.toByte() -> AssignObj(ObjField.Name(FunSimCtx.RegId.GLOBAL, (item.ins.format[2] as InstFmt.SId).getString(item)), LoadReg.acc) // sttoglobalrecord
+
                 0x49.toByte() -> ObjField.Name(
                     FunSimCtx.RegId.THIS,
                     (item.ins.format[2] as InstFmt.SId).getString(item)
@@ -186,6 +189,8 @@ sealed interface IrOp {
 
                 0x7e.toByte() -> LoadExternalModule(item.asm.code.method.clazz!!.moduleInfo!!.regularImports[item.opUnits[1].toUnsignedInt()]).st2Acc()
 
+                0x7f.toByte() -> AssignObj(ObjField.Name(FunSimCtx.RegId.GLOBAL, (item.ins.format[2] as InstFmt.SId).getString(item)), LoadReg.acc) // stglobalvar
+
                 0x80.toByte() -> JSValue.ArrInst(emptyList()).just().st2Acc()
                 0x81.toByte() -> JSValue.asArr(item.asm,(item.ins.format[2] as InstFmt.LId).getLA(item)).just().st2Acc()
                 0x82.toByte() -> JSValue.asObj(item.asm,(item.ins.format[2] as InstFmt.LId).getLA(item)).just().st2Acc()
@@ -229,6 +234,8 @@ sealed interface IrOp {
                 0xc8.toByte() -> AssignObj(ObjField.Value(regId(item.opUnits[2]), regId(item.opUnits[3])), LoadReg.acc)
 
                 0xcb.toByte() -> AssignObj(ObjField.Index(regId(item.opUnits[2]),item.opUnits[3].toUnsignedInt()), LoadReg.acc)
+
+                0xcf.toByte() -> UnImplemented(item) // copyrestargs - 需要更复杂的实现
 
                 0xd3.toByte() -> JSValue.BigInt((item.ins.format[1] as InstFmt.SId).getString(item)).just().st2Acc()
 

@@ -107,7 +107,51 @@ class StructuredDecompilerTest {
             }
         }
     }
-    
+
+    @Test
+    fun testComplexLoop() {
+        val abcFile = File(testAbcDir, "complex_loop.abc")
+        if (!abcFile.exists()) {
+            println("File not found: ${abcFile.absolutePath}")
+            return
+        }
+
+        val sourceFile = File("/home/orz/project/unitTest/isa/isa_dynamic/complex_loop/complex_loop.js")
+        if (sourceFile.exists()) {
+            println("=== Source Code ===")
+            println(sourceFile.readText())
+        }
+
+        println("\n${"=".repeat(60)}")
+        println("Decompiled Output:")
+        println("=".repeat(60))
+
+        val mmap = FileChannel.open(abcFile.toPath())
+            .map(FileChannel.MapMode.READ_ONLY, 0, abcFile.length())
+        val abc = AbcBuf(abcFile.name, wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+
+        for ((offset, classItem) in abc.classes) {
+            if (classItem !is AbcClass) continue
+
+            for (method in classItem.methods) {
+                val code = method.codeItem ?: continue
+
+                println("\n// Method: ${method.name}")
+                try {
+                    val asm = Asm(code)
+                    val result = StructuredDecompiler.decompile(asm)
+                    println(result)
+                } catch (e: ToJs.UnImplementedError) {
+                    println("  /* unimplemented: ${e.item.asmName} */")
+                } catch (e: NotImplementedError) {
+                    println("  /* NotImplementedError */")
+                } catch (e: Exception) {
+                    println("  /* Error: ${e.message} */")
+                }
+            }
+        }
+    }
+
     @Test
     fun testSpecificFile() {
         val abcFile = File("/home/orz/project/unitTest/test.abc")
