@@ -342,6 +342,15 @@ sealed interface IrOp {
         override fun read(): Sequence<FunSimCtx.RegId> = args.asSequence() + FunSimCtx.RegId.ACC
         override fun effected(): Sequence<FunSimCtx.RegId> = sequenceOf(FunSimCtx.RegId.ACC)
     }
+    class CallWithTarget(
+        val target: Expression,
+        val args: List<FunSimCtx.RegId> = emptyList(),
+        val overrideThis: FunSimCtx.RegId? = null
+    ): Expression {
+        override fun read(): Sequence<FunSimCtx.RegId> =
+            target.read() + args.asSequence() + (overrideThis?.let { sequenceOf(it) } ?: emptySequence())
+        override fun effected(): Sequence<FunSimCtx.RegId> = sequenceOf(FunSimCtx.RegId.ACC)
+    }
     class LoadExternalModule(val ext: ModuleLiteralArray.RegularImport): NoRegExpression
     class GetModuleNamespace(val ns: OhmUrl) : NoRegExpression
 

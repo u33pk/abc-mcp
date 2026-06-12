@@ -23,6 +23,11 @@ fun IrOp.Expression.replaceReg(reg: FunSimCtx.RegId, replaceTo: FunSimCtx.RegId)
             args.map { if (it == reg) replaceTo else it },
             overrideThis?.let { if (it == reg) replaceTo else it }
         )
+        is IrOp.CallWithTarget -> IrOp.CallWithTarget(
+            target.replaceReg(reg, replaceTo),
+            args.map { if (it == reg) replaceTo else it },
+            overrideThis?.let { if (it == reg) replaceTo else it }
+        )
         is IrOp.DynamicImport -> if (regId == reg) IrOp.DynamicImport(replaceTo) else this
         is IrOp.LoadReg -> if (regId == reg) IrOp.LoadReg(replaceTo) else this
         is IrOp.NewClass -> if (parent == reg) IrOp.NewClass(constructor, fields, replaceTo) else this

@@ -76,6 +76,7 @@ class ToJs(val asm: Asm) {
             is IrOp.BiExp.Sub -> "${toJS(exp.l)} - ${toJS(exp.r)}"
             is IrOp.BiExp.Xor -> "${toJS(exp.l)} ^ ${toJS(exp.r)}"
             is IrOp.CallAcc -> "${ exp.overrideThis?.let { toJS(it) } ?: "this" }.${toJS(FunSimCtx.RegId.ACC)}(${exp.args.joinToString { toJS(it) }})"
+            is IrOp.CallWithTarget -> "${toJS(exp.target)}(${exp.args.joinToString { toJS(it) }})"
             is IrOp.DynamicImport -> "import(${toJS(exp.regId)})"
             is IrOp.JustImm -> toJS(exp.value)
             is IrOp.LoadExternalModule -> "${exp.ext.also { imports.add(it) }.localName}"

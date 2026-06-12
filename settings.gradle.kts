@@ -23,6 +23,7 @@ include(":modules:common")
 include(":modules:abcde")
 include(":modules:resde")
 include(":modules:hapde")
+include(":modules:mcp")
 
 include(":examples:findStr")
 include(":examples:abclen")

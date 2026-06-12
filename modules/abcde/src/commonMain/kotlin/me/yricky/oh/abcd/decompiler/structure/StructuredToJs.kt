@@ -135,35 +135,8 @@ class StructuredToJs(val asm: Asm) {
                 liveOut.add(FunSimCtx.RegId.ACC)
                 val optimizedOps = IrOpOptimizer.optimizeList(ops, liveOut)
                 
-                // 追踪 ACC 的来源，用于合并函数调用
-                var accSource: IrOp.Expression? = null
-                
                 for (irOp in optimizedOps) {
-                    when {
-                        // _acc_ = obj.method; 模式
-                        irOp is IrOp.AssignReg && irOp.left == FunSimCtx.RegId.ACC -> {
-                            accSource = irOp.right
-                            sb.append("$indentStr${generateIrOp(irOp)}\n")
-                        }
-                        // _acc_ = this._acc_(args); 模式，且 ACC 来源是 ObjField.Name
-                        irOp is IrOp.AssignReg && irOp.left == FunSimCtx.RegId.ACC &&
-                        irOp.right is IrOp.CallAcc && accSource is IrOp.ObjField.Name -> {
-                            val call = irOp.right as IrOp.CallAcc
-                            val source = accSource as IrOp.ObjField.Name
-                            // 合并为 obj.method(args)
-                            val objStr = generateRegId(source.obj)
-                            val argsStr = call.args.joinToString { generateRegId(it) }
-                            sb.append("$indentStr${generateRegId(FunSimCtx.RegId.ACC)} = $objStr.${source.name}($argsStr);\n")
-                            accSource = null
-                        }
-                        else -> {
-                            sb.append("$indentStr${generateIrOp(irOp)}\n")
-                            // 非 ACC 赋值，清除来源追踪
-                            if (irOp !is IrOp.AssignReg || irOp.left != FunSimCtx.RegId.ACC) {
-                                // 不清除，因为可能还有后续的 CallAcc
-                            }
-                        }
-                    }
+                    sb.append("$indentStr${generateIrOp(irOp)}\n")
                 }
             }
             is CodeSegment.Return -> {
@@ -235,6 +208,7 @@ class StructuredToJs(val asm: Asm) {
             is IrOp.BiExp.InstOf -> "${generateExpression(exp.l)} instanceof ${generateExpression(exp.r)}"
             is IrOp.BiExp.IsIn -> "${generateExpression(exp.l)} in ${generateExpression(exp.r)}"
             is IrOp.CallAcc -> "${exp.overrideThis?.let { generateRegId(it) } ?: "this"}.${generateRegId(FunSimCtx.RegId.ACC)}(${exp.args.joinToString { generateRegId(it) }})"
+            is IrOp.CallWithTarget -> "${generateExpression(exp.target)}(${exp.args.joinToString { generateRegId(it) }})"
             is IrOp.DynamicImport -> "import(${generateRegId(exp.regId)})"
             is IrOp.JustImm -> generateJsValue(exp.value)
             is IrOp.LoadExternalModule -> "${exp.ext.also { imports.add(it) }.localName}"

@@ -353,31 +353,66 @@ object ExpressionPropagationPass : OptimizationPass {
      * 超过此阈值的表达式不会被内联
      */
     private const val MAX_INLINE_COMPLEXITY = 5
+
+    /**
+     * 判断表达式是否是可调用的函数引用
+     * 排除读取 ACC 的表达式（因为 ACC 在调用前会改变）
+     */
+    private fun isCallableExpression(expr: IrOp.Expression): Boolean {
+        // 如果表达式读取 ACC，则不适合作为合并目标
+        if (expr.read().contains(FunSimCtx.RegId.ACC)) return false
+        return when (expr) {
+            is IrOp.ObjField.Name -> true      // obj.method
+            is IrOp.ObjField.Index -> true      // obj[index]
+            is IrOp.ObjField.Value -> true      // obj[value]
+            is IrOp.LoadReg -> true             // variable
+            is IrOp.DynamicImport -> true       // import()
+            else -> false
+        }
+    }
     
     override fun run(ops: List<IrOp>): List<IrOp> {
         // 追踪每个寄存器的最近赋值表达式
         val exprMap = mutableMapOf<FunSimCtx.RegId, IrOp.Expression>()
         val result = mutableListOf<IrOp>()
-        
+
+        var prevInlinedRight: IrOp.Expression? = null
+        var prevIndex: Int = -1
+
         for (op in ops) {
             when (op) {
                 is IrOp.AssignReg -> {
                     // 尝试内联右值中的 LoadReg
                     val inlined = inlineExpression(op.right, exprMap)
-                    result.add(IrOp.AssignReg(op.left, inlined))
-                    
-                    // 更新表达式映射
-                    exprMap[op.left] = inlined
-                    
-                    // 如果是 ACC 赋值，清除之前的 ACC 映射
-                    if (op.left == FunSimCtx.RegId.ACC) {
-                        // ACC 被重新赋值，后续的 LoadReg(ACC) 应该使用新值
+
+                    // 检测函数调用合并模式：
+                    // prev: _acc_ = X (X 是函数引用)
+                    // curr: _acc_ = CallAcc(args, overrideThis)
+                    val shouldMerge = op.left == FunSimCtx.RegId.ACC && op.right is IrOp.CallAcc &&
+                        prevInlinedRight != null && isCallableExpression(prevInlinedRight)
+                    if (shouldMerge) {
+                        val call = op.right as IrOp.CallAcc
+                        // 将前一条指令替换为 NOP（已合并到当前指令）
+                        result[prevIndex] = IrOp.NOP
+                        // 合并为 CallWithTarget
+                        val merged = IrOp.CallWithTarget(prevInlinedRight, call.args, call.overrideThis)
+                        result.add(IrOp.AssignReg(FunSimCtx.RegId.ACC, merged))
+                        exprMap[FunSimCtx.RegId.ACC] = merged
+                        prevInlinedRight = null
+                        prevIndex = -1
+                    } else {
+                        result.add(IrOp.AssignReg(op.left, inlined))
+                        exprMap[op.left] = inlined
+                        prevInlinedRight = if (op.left == FunSimCtx.RegId.ACC) inlined else null
+                        prevIndex = result.size - 1
                     }
                 }
                 is IrOp.AssignObj -> {
                     // 对象赋值可能影响所有已知表达式，保守地清除
                     exprMap.clear()
                     result.add(op)
+                    prevInlinedRight = null
+                    prevIndex = -1
                 }
                 is IrOp.Statement -> {
                     // 其他语句可能有副作用，清除受影响的寄存器
@@ -385,11 +420,17 @@ object ExpressionPropagationPass : OptimizationPass {
                         exprMap.remove(reg)
                     }
                     result.add(op)
+                    prevInlinedRight = null
+                    prevIndex = -1
                 }
-                else -> result.add(op)
+                else -> {
+                    result.add(op)
+                    prevInlinedRight = null
+                    prevIndex = -1
+                }
             }
         }
-        
+
         return result
     }
     
@@ -447,6 +488,19 @@ object ExpressionPropagationPass : OptimizationPass {
                 val newArgs = expr.args.map { reg -> resolveReg(reg, exprMap) }
                 if (newThis != expr.overrideThis || newArgs != expr.args) {
                     IrOp.CallAcc(newArgs, newThis)
+                } else {
+                    expr
+                }
+            }
+            is IrOp.CallWithTarget -> {
+                // 内联 target
+                val newTarget = inlineExpression(expr.target, exprMap, depth + 1)
+                // 内联 overrideThis
+                val newThis = expr.overrideThis?.let { reg -> resolveReg(reg, exprMap) }
+                // 内联 args
+                val newArgs = expr.args.map { reg -> resolveReg(reg, exprMap) }
+                if (newTarget != expr.target || newThis != expr.overrideThis || newArgs != expr.args) {
+                    IrOp.CallWithTarget(newTarget, newArgs, newThis)
                 } else {
                     expr
                 }
@@ -510,6 +564,7 @@ object ExpressionPropagationPass : OptimizationPass {
             is IrOp.ObjField.Index -> 2
             is IrOp.ObjField.Value -> 2
             is IrOp.CallAcc -> 3 + expr.args.size
+            is IrOp.CallWithTarget -> 3 + expressionComplexity(expr.target) + expr.args.size
             is IrOp.NewInst -> 3 + expr.constructorArgs.size
             is IrOp.NewClass -> 4
             is IrOp.BiExp -> 1 + expressionComplexity(expr.l) + expressionComplexity(expr.r)
