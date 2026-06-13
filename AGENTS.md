@@ -231,6 +231,10 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - 表现为 `limitKeyConfigs()` 中读取到异常大的 `keyCount`，进而触发 `OutOfMemoryError`
    - `open_hap` 已增加降级处理避免崩溃，但 `search_resources` / `resolve_resource` 在该格式下仍无法工作
    - 需要对比新旧 Restool 格式差异，修正 `ResIndexBuf` 的解析偏移和字段布局
+8. **分块读取超大方法**
+   - 为 `decompile_method` 增加可选参数 `offset`/`limit`（按字符或按行），或新增 `decompile_method_chunk` 工具
+   - 使 LLM 可以逐段读取超过输出预算的超大方法，而不必一次性接收完整反编译结果
+   - 依赖已实现的 `MethodSummary` 与部分输出能力
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）

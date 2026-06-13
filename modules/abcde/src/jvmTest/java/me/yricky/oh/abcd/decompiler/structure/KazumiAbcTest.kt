@@ -2,11 +2,13 @@ package me.yricky.oh.abcd.decompiler.structure
 
 import me.yricky.oh.abcd.AbcBuf
 import me.yricky.oh.abcd.cfm.AbcClass
+import me.yricky.oh.abcd.cfm.AbcMethod
 import me.yricky.oh.abcd.cfm.argsStr
 import me.yricky.oh.abcd.decompiler.ToJs
 import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.abcd.isa.asmName
 import me.yricky.oh.common.wrapAsLEByteBuf
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.nio.ByteOrder
@@ -57,12 +59,6 @@ class KazumiAbcTest {
                     continue
                 }
 
-                // 临时跳过已知会导致反编译器产生超大字符串的方法
-                if (method.name.contains("setSettings")) {
-                    skippedMethods++
-                    continue
-                }
-
                 try {
                     if (totalMethods >= 1180) {
                         println("  Decompiling method $totalMethods: ${classItem.name}.${method.name}")
@@ -107,6 +103,49 @@ class KazumiAbcTest {
             println("\n=== Errors (first ${errorSamples.size} of $errorCount) ===")
             errorSamples.forEach { println("  $it") }
         }
+    }
+
+    @Test
+    fun testSetSettingsNoOOM() {
+        if (!abcFile.exists()) {
+            println("ABC file not found")
+            return
+        }
+
+        val mmap = FileChannel.open(abcFile.toPath())
+            .map(FileChannel.MapMode.READ_ONLY, 0, abcFile.length())
+        val abc = AbcBuf(abcFile.name, wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+
+        val webViewClasses = abc.classes.values.filterIsInstance<AbcClass>()
+            .filter { it.name.contains("InApp") || it.name.contains("WebView") }
+        println("WebView-like classes: ${webViewClasses.map { it.name }}")
+
+        val setSettingsMethods = abc.classes.values.filterIsInstance<AbcClass>()
+            .flatMap { cls -> cls.methods.map { cls to it } }
+            .filter { (_, m) -> m.name.contains("setSettings") || m.name.contains("setSetting") }
+        println("setSettings-like methods: ${setSettingsMethods.map { "${it.first.name}.${it.second.name}" }}")
+
+        val targetClass = webViewClasses.find { it.name.endsWith("/InAppWebView") }
+        assertTrue("Should find InAppWebView class", targetClass != null)
+
+        val method = targetClass!!.methods.find { it.name.contains("setSettings") }
+        assertTrue("Should find setSettings method in ${targetClass.name}", method != null)
+
+        val code = method!!.codeItem
+        assertTrue("setSettings should have code", code != null)
+
+        val asm = Asm(code!!)
+        val result = StructuredDecompiler.decompile(asm)
+        println(result)
+
+        // 超大方法被截断时，仍应返回部分代码 + 摘要
+        assertTrue("Should contain truncation marker", result.contains("[method too large"))
+        assertTrue("Should contain method signature", result.contains("function") && result.contains("setSettings"))
+        assertTrue("Should contain method summary", result.contains("Method summary:"))
+        assertTrue("Should contain instruction count", result.contains("instructions:"))
+        // 返回给 LLM 的总行数受展示上限控制（摘要 + 部分代码），不应过多占用上下文
+        assertTrue("Returned output should fit within display line budget",
+            result.lines().size <= StructuredDecompiler.MAX_DISPLAY_OUTPUT_LINES + 20)
     }
 
     @Test

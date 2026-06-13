@@ -29,84 +29,125 @@ fun decodeMethodName(method: AbcMethod): String {
 }
 
 /**
+ * 输出超过预算时抛出此异常，由 generate() 顶层捕获并返回截断提示
+ * @param generatedChars 异常发生前已生成的字符数
+ * @param partialOutput 已生成的部分输出，用于在截断时仍返回可用内容
+ */
+class OutputTooLargeException(
+    val generatedChars: Int,
+    val partialOutput: String? = null
+) : Exception("Decompiler output exceeded budget")
+
+/**
  * 基于结构化分析的代码生成器
  * 将 Region 树转换为 JavaScript/TypeScript 代码
  */
 class StructuredToJs(val asm: Asm) {
+    companion object {
+        /** 单个方法反编译输出的最大字符数（10 MB） */
+        const val MAX_TOTAL_OUTPUT_SIZE = 10 * 1024 * 1024
+        /** 字面量数组/对象最多完整展示的元素/键值对数量 */
+        const val MAX_LITERAL_ARRAY_SIZE = 1000
+    }
+
     private val imports = mutableListOf<ModuleLiteralArray.RegularImport>()
     private val nsImports = mutableListOf<ModuleLiteralArray.NamespaceImport>()
+    private var outputSize = 0
 
     /**
-     * 生成完整的函数代码
+     * 检查继续追加 [additional] 个字符是否会超过预算
      */
-    fun generate(region: Region): String {
-        val sb = StringBuilder()
-        
-        // 生成函数头（使用解码后的方法名）
-        val methodName = decodeMethodName(asm.code.method)
-        val restIndex = asm.irOpList.filterIsInstance<IrOp.CopyRestArgs>().firstOrNull()?.startIdx ?: -1
-        sb.append("function $methodName${asm.code.method.argsStr(restIndex)} {\n")
-        
-        // 生成函数体
-        sb.append(generateRegion(region, 1))
-        
-        // 生成函数尾
-        sb.append("}")
-        
-        // 添加导入语句
-        val importStr = imports.joinToString(separator = ";\n") { it.toString() }
-        val nsImportStr = nsImports.joinToString(separator = ";\n") { it.toString() }
-        
-        return "$importStr\n$nsImportStr\n\n$sb".trim()
+    private fun checkBudget(additional: Int) {
+        if (outputSize + additional > MAX_TOTAL_OUTPUT_SIZE) {
+            throw OutputTooLargeException(outputSize)
+        }
     }
 
     /**
-     * 生成区域代码
+     * 在预算内追加文本到 StringBuilder
      */
-    private fun generateRegion(region: Region, indent: Int, depth: Int = 0): String {
-        if (depth > 100) return "${"    ".repeat(indent)}// [depth limit reached]\n"
+    private fun StringBuilder.safeAppend(text: String) {
+        checkBudget(text.length)
+        append(text)
+        outputSize += text.length
+    }
+
+    /**
+     * 生成完整的函数代码
+     * @return 生成的 JS 代码；若超出预算，会把当前已生成内容附加到 [OutputTooLargeException.partialOutput] 后重新抛出
+     */
+    fun generate(region: Region): String {
         val sb = StringBuilder()
+        return try {
+            // 生成函数头（使用解码后的方法名）
+            val methodName = decodeMethodName(asm.code.method)
+            val restIndex = asm.irOpList.filterIsInstance<IrOp.CopyRestArgs>().firstOrNull()?.startIdx ?: -1
+            sb.safeAppend("function $methodName${asm.code.method.argsStr(restIndex)} {\n")
+
+            // 生成函数体（直接写入 sb，确保超出预算时保留尽可能多的部分输出）
+            generateRegion(region, sb, 1)
+
+            // 生成函数尾
+            sb.safeAppend("}")
+
+            // 添加导入语句
+            val importStr = imports.joinToString(separator = ";\n") { it.toString() }
+            val nsImportStr = nsImports.joinToString(separator = ";\n") { it.toString() }
+
+            "$importStr\n$nsImportStr\n\n$sb".trim()
+        } catch (e: OutputTooLargeException) {
+            // 把当前已生成的部分输出附加到异常中，供上层拼接摘要后返回给 LLM
+            throw OutputTooLargeException(e.generatedChars, sb.toString())
+        }
+    }
+
+    /**
+     * 生成区域代码，直接追加到 [out]
+     */
+    private fun generateRegion(region: Region, out: StringBuilder, indent: Int, depth: Int = 0) {
+        if (depth > 100) {
+            out.safeAppend("${"    ".repeat(indent)}// [depth limit reached]\n")
+            return
+        }
         val indentStr = "    ".repeat(indent)
-        
+
         for (statement in region.statements) {
             when (statement) {
                 is IfStatement -> {
                     val condStr = generateCondition(statement.condition)
-                    sb.append("${indentStr}if ($condStr) {\n")
+                    out.safeAppend("${indentStr}if ($condStr) {\n")
                     if (statement.thenBranch != null) {
-                        sb.append(generateRegion(statement.thenBranch, indent + 1, depth + 1))
+                        generateRegion(statement.thenBranch, out, indent + 1, depth + 1)
                     }
                     if (statement.elseBranch != null) {
-                        sb.append("${indentStr}} else {\n")
-                        sb.append(generateRegion(statement.elseBranch, indent + 1, depth + 1))
+                        out.safeAppend("${indentStr}} else {\n")
+                        generateRegion(statement.elseBranch, out, indent + 1, depth + 1)
                     }
-                    sb.append("${indentStr}}\n")
+                    out.safeAppend("${indentStr}}\n")
                 }
                 is WhileStatement -> {
                     if (statement.condition == null) {
-                        sb.append("${indentStr}while (true) {\n")
+                        out.safeAppend("${indentStr}while (true) {\n")
                     } else {
                         val condStr = generateCondition(statement.condition)
-                        sb.append("${indentStr}while ($condStr) {\n")
+                        out.safeAppend("${indentStr}while ($condStr) {\n")
                     }
-                    sb.append(generateRegion(statement.body, indent + 1, depth + 1))
-                    sb.append("${indentStr}}\n")
+                    generateRegion(statement.body, out, indent + 1, depth + 1)
+                    out.safeAppend("${indentStr}}\n")
                 }
                 is DoWhileStatement -> {
-                    sb.append("${indentStr}do {\n")
-                    sb.append(generateRegion(statement.body, indent + 1, depth + 1))
-                    sb.append("${indentStr}} while (/* condition */);\n")
+                    out.safeAppend("${indentStr}do {\n")
+                    generateRegion(statement.body, out, indent + 1, depth + 1)
+                    out.safeAppend("${indentStr}} while (/* condition */);\n")
                 }
                 is LinearStatement -> {
-                    sb.append(generateLinearBlock(statement.block, indent))
+                    generateLinearBlock(statement.block, out, indent)
                 }
                 else -> {
-                    sb.append("${indentStr}// unknown statement type\n")
+                    out.safeAppend("${indentStr}// unknown statement type\n")
                 }
             }
         }
-        
-        return sb.toString()
     }
 
     /**
@@ -140,12 +181,11 @@ class StructuredToJs(val asm: Asm) {
     }
 
     /**
-     * 生成线性基本块的代码
+     * 生成线性基本块的代码，直接追加到 [out]
      */
-    private fun generateLinearBlock(block: CodeSegment.BasicBlock, indent: Int): String {
-        val sb = StringBuilder()
+    private fun generateLinearBlock(block: CodeSegment.BasicBlock, out: StringBuilder, indent: Int) {
         val indentStr = "    ".repeat(indent)
-        
+
         when (block) {
             is CodeSegment.Linear -> {
                 // 收集所有指令并优化
@@ -153,13 +193,13 @@ class StructuredToJs(val asm: Asm) {
                 val liveOut = mutableSetOf<FunSimCtx.RegId>()
                 liveOut.add(FunSimCtx.RegId.ACC)
                 val optimizedOps = IrOpOptimizer.optimizeList(ops, liveOut)
-                
+
                 for (irOp in optimizedOps) {
-                    sb.append("$indentStr${generateIrOp(irOp)}\n")
+                    out.safeAppend("$indentStr${generateIrOp(irOp)}\n")
                 }
             }
             is CodeSegment.Return -> {
-                sb.append("$indentStr${generateIrOp(block.item.irOp)}\n")
+                out.safeAppend("$indentStr${generateIrOp(block.item.irOp)}\n")
             }
             is CodeSegment.JumpMark -> {
                 // 无条件跳转，通常不需要生成代码
@@ -168,8 +208,6 @@ class StructuredToJs(val asm: Asm) {
                 // 条件跳转，通常由 IfStatement 处理
             }
         }
-        
-        return sb.toString()
     }
 
     /**
@@ -275,10 +313,19 @@ class StructuredToJs(val asm: Asm) {
 
     /**
      * 生成 JS 值的代码
+     * 对超大 ArrInst / ObjInst 做截断，避免单行表达式突破 JVM 字符串上限
      */
     private fun generateJsValue(jsValue: me.yricky.oh.abcd.decompiler.behaviour.JSValue): String {
         return when (jsValue) {
-            is me.yricky.oh.abcd.decompiler.behaviour.JSValue.ArrInst -> jsValue.content.joinToString(",", "[", "]") { generateJsValue(it) }
+            is me.yricky.oh.abcd.decompiler.behaviour.JSValue.ArrInst -> {
+                if (jsValue.content.size > MAX_LITERAL_ARRAY_SIZE) {
+                    val preview = jsValue.content.take(MAX_LITERAL_ARRAY_SIZE)
+                        .joinToString(",") { generateJsValue(it) }
+                    "[$preview,/* ... ${jsValue.content.size - MAX_LITERAL_ARRAY_SIZE} more items */]"
+                } else {
+                    jsValue.content.joinToString(",", "[", "]") { generateJsValue(it) }
+                }
+            }
             is me.yricky.oh.abcd.decompiler.behaviour.JSValue.ClassObj -> "/* classObj */"
             is me.yricky.oh.abcd.decompiler.behaviour.JSValue.Error -> "Error(...)"
             me.yricky.oh.abcd.decompiler.behaviour.JSValue.False -> "false"
@@ -292,8 +339,18 @@ class StructuredToJs(val asm: Asm) {
             me.yricky.oh.abcd.decompiler.behaviour.JSValue.Null -> "null"
             is me.yricky.oh.abcd.decompiler.behaviour.JSValue.Number -> jsValue.value.toString()
             is me.yricky.oh.abcd.decompiler.behaviour.JSValue.BigInt -> "${jsValue.value}n"
-            is me.yricky.oh.abcd.decompiler.behaviour.JSValue.ObjInst -> if (jsValue.content.isEmpty()) "{}" else jsValue.content.asSequence().joinToString(", ", "{", "}") {
-                "${it.key}:${generateJsValue(it.value)}"
+            is me.yricky.oh.abcd.decompiler.behaviour.JSValue.ObjInst -> {
+                if (jsValue.content.size > MAX_LITERAL_ARRAY_SIZE) {
+                    val preview = jsValue.content.entries.take(MAX_LITERAL_ARRAY_SIZE)
+                        .joinToString(", ") { "${it.key}:${generateJsValue(it.value)}" }
+                    "{$preview,/* ... ${jsValue.content.size - MAX_LITERAL_ARRAY_SIZE} more keys */}"
+                } else if (jsValue.content.isEmpty()) {
+                    "{}"
+                } else {
+                    jsValue.content.asSequence().joinToString(", ", "{", "}") {
+                        "${it.key}:${generateJsValue(it.value)}"
+                    }
+                }
             }
             is me.yricky.oh.abcd.decompiler.behaviour.JSValue.Str -> "\"${jsValue.value}\""
             me.yricky.oh.abcd.decompiler.behaviour.JSValue.Symbol.Iterator -> "Symbol.iterator"

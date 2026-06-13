@@ -22,6 +22,13 @@ class StructureAnalysis(
     private val maxNodes = 500
 
     /**
+     * 尾节点复制放大因子上限。
+     * 当 `predecessorCount * tailStatementsSize` 超过此值时，
+     * 放弃复制，改为保留共享尾节点并附加注释，防止输出指数级膨胀。
+     */
+    private val maxTailDuplicationFactor = 100
+
+    /**
      * 执行结构化分析
      * @return 最终的单一 Region（如果成功）
      */
@@ -392,25 +399,52 @@ class StructureAnalysis(
         val tailRegions = regionGraph.nodes
             .filter { it.type == Region.RegionType.Tail && regionGraph.inDegree(it) > 1 }
             .toMutableList()
-        
+
         if (tailRegions.isEmpty()) return false
-        
+
         // 按入度排序，选择入度最高的
         tailRegions.sortByDescending { regionGraph.inDegree(it) }
         val region = tailRegions.first()
-        
+
+        val predecessors = regionGraph.predecessors(region).toList()
+        val tailSize = estimateRegionSize(region)
+        val duplicationFactor = predecessors.size * tailSize
+
+        // 如果复制会导致输出过度膨胀，放弃本次修复，让上层抛出结构化失败
+        // 从而避免生成指数级膨胀的代码，也避免在复制过程中消耗大量内存
+        if (duplicationFactor > maxTailDuplicationFactor) {
+            return false
+        }
+
         var nodeIndex = 0
-        
-        for (predecessor in regionGraph.predecessors(region).toList()) {
+
+        for (predecessor in predecessors) {
             val value = regionGraph.edgeValue(predecessor, region) ?: false
             val copyNode = region.copy()
             copyNode.name = "${copyNode.name}_${nodeIndex++}"
             regionGraph.addNode(copyNode)
             regionGraph.putEdgeValue(predecessor, copyNode, value)
         }
-        
+
         regionGraph.removeNode(region)
         return true
+    }
+
+    /**
+     * 估算 Region 的大小（语句数），用于限制尾节点复制
+     */
+    private fun estimateRegionSize(region: Region): Int {
+        var size = region.statements.size
+        for (stmt in region.statements) {
+            size += when (stmt) {
+                is IfStatement -> estimateRegionSize(stmt.thenBranch ?: Region("", Region.RegionType.Linear)) +
+                        estimateRegionSize(stmt.elseBranch ?: Region("", Region.RegionType.Linear))
+                is WhileStatement -> estimateRegionSize(stmt.body)
+                is DoWhileStatement -> estimateRegionSize(stmt.body)
+                else -> 0
+            }
+        }
+        return size.coerceAtLeast(1)
     }
 
     // ========== 辅助方法 ==========
