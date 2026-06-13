@@ -105,7 +105,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 ### 入口
 `me.yricky.oh.mcp.MainKt`
 
-### 暴露的 Tools（13 个）
+### 暴露的 Tools（14 个）
 
 #### ABC 字节码工具
 | Tool | 功能 |
@@ -118,6 +118,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 | `search_strings` | 搜索字符串常量（正则匹配） |
 | `disassemble_method` | 获取方法的字节码反汇编 |
 | `get_method_info` | 获取方法详情（参数名、行号、调试信息） |
+| `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
 
 #### HAP 包工具
 | Tool | 功能 |
@@ -222,6 +223,8 @@ _acc_ = AtkTsGlobal.print(_acc_);
 3. **增强常量折叠** - 嵌套常量、布尔简化
 4. **重复 Load 消除** - 消除冗余的对象字段读取
 5. **交叉引用分析** - 查找方法/字段的调用者
+   - ✅ 方法调用 xref 已实现：`get_xrefs_to_method` 工具 + `XRefIndex` 索引 + `SessionManager` 缓存
+   - 待扩展：字段读写引用、类实例化/使用引用
 6. **优化反编译输出中的方法名显示**
    - 当前匿名函数输出为 `function function [ANONYMOUS](...)`，存在重复的 `function` 关键字
    - 编译器生成的变体编号（如 `foo^1`）可读性较差
