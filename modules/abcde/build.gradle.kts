@@ -28,10 +28,8 @@ repositories {
 }
 
 kotlin {
-    jvm{
-        withJava()
-    }
-    jvmToolchain(17)
+    jvm()
+    jvmToolchain(26)
 
 
     sourceSets {
@@ -61,8 +59,8 @@ kotlin {
             }
         }
 
-        val nativeEnable = (extra["native.enable"] as String)
-        val nativeConfig = (extra["native.config"] as String).split(' ')
+        val nativeEnable = (findProperty("native.enable") as? String) ?: "0"
+        val nativeConfig = (findProperty("native.config") as? String)?.split(' ') ?: emptyList()
         if(nativeEnable == "1"){
             println("native.config:${nativeConfig}")
             nativeMain{}

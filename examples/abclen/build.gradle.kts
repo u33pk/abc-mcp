@@ -1,8 +1,5 @@
-
 plugins {
     kotlin("multiplatform")
-    id("java")
-//    id("application")
 }
 
 group = "com.yricky"
@@ -16,11 +13,8 @@ repositories {
 }
 
 kotlin {
-    jvm{
-        withJava()
-    }
-    jvmToolchain(17)
-
+    jvm()
+    jvmToolchain(26)
 
     sourceSets {
         jvmMain{
@@ -37,17 +31,22 @@ kotlin {
     }
 }
 
-//application{
-//    mainClass.set("me.yricky.oh.findstr.MainKt")
-//}
+tasks.register<Jar>("fatJar") {
+    group = "build"
+    description = "Assembles a fat jar containing all runtime dependencies"
+    dependsOn("jvmJar")
 
-tasks {
-    register<Jar>("fatJar") {
-        dependsOn.addAll(listOf("compileJava", "compileKotlinJvm", "processResources")) // We need this for Gradle optimization to work
-        archiveClassifier.set("fat") // Naming the jar
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-        manifest { attributes(mapOf("Main-Class" to "com.yricky.oh.abclen.MainKt")) } // Provided we set it up in the application plugin configuration
-        val contents = configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) } + sourceSets.main.get().output
-        from(contents)
+    archiveClassifier.set("fat")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from({
+        configurations["jvmRuntimeClasspath"].map { if (it.isDirectory) it else zipTree(it) }
+    })
+    from({
+        tasks["jvmJar"].outputs.files.singleFile.let { if (it.isDirectory) it else zipTree(it) }
+    })
+
+    manifest {
+        attributes["Main-Class"] = "com.yricky.oh.abclen.MainKt"
     }
 }

@@ -201,7 +201,7 @@ object StructuredDecompiler {
                     basicBlockCount = basicBlockCount,
                     vregCount = asm.code.numVRegs,
                     hasTryCatch = asm.code.tryBlocks.isNotEmpty(),
-                    hasRestArgs = asm.irOpList.any { it is IrOp.CopyRestArgs },
+                    hasRestArgs = asm.irOpList.any { op -> op is IrOp.AssignReg && op.right is IrOp.CopyRestArgs },
                     uniqueStringCount = uniqueStrings.size,
                     topStrings = topStrings,
                     uniqueCalledMethodCount = uniqueMethods.size,

@@ -4,7 +4,7 @@ import kotlinx.serialization.json.*
 import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.abcd.decompiler.structure.decodeMethodName
 import me.yricky.oh.abcd.isa.Asm
-import me.yricky.oh.abcd.isa.asmName
+import me.yricky.oh.abcd.isa.util.fullDisasmLine
 import me.yricky.oh.mcp.session.SessionManager
 
 class DisassembleMethodTool(private val sessionManager: SessionManager) : Tool {
@@ -57,7 +57,7 @@ class DisassembleMethodTool(private val sessionManager: SessionManager) : Tool {
         sb.appendLine("// Instructions: ${asm.list.size}")
 
         asm.list.forEach { item ->
-            sb.appendLine("[${item.codeOffset}] ${item.asmName}")
+            sb.appendLine(item.fullDisasmLine())
         }
 
         return sb.toString()

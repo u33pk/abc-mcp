@@ -13,7 +13,6 @@ repositories {
 
 kotlin {
     jvm {
-        withJava()
         mainRun {
             mainClass.set("me.yricky.oh.mcp.MainKt")
         }

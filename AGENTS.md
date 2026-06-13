@@ -14,8 +14,8 @@
 - **语言**：Kotlin Multiplatform（核心为 JVM）
 - **GUI**：Jetpack Compose Desktop（非核心）
 - **构建**：Gradle (Kotlin DSL)
-- **Kotlin 版本**：2.0.21
-- **Gradle 版本**：8.6
+- **Kotlin 版本**：2.4.0
+- **Gradle 版本**：9.5.1
 
 ## 项目结构
 
@@ -56,12 +56,11 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 
 | JDK 版本 | 状态 | 说明 |
 |---------|------|------|
-| **JDK 17** | ✅ 推荐 | 项目原生 `jvmToolchain(17)` 配置 |
-| **JDK 21** | ✅ 可用 | 需将所有模块的 `jvmToolchain(17)` 改为 `jvmToolchain(21)` |
-| **JDK 25** | ❌ 不支持 | Gradle 8.6 内置 Kotlin 无法识别 Java 25 |
-| **JDK 26** | ❌ 不支持 | Gradle 8.6 内置 Kotlin 无法识别 Java 26 |
+| **JDK 17 / 21** | ✅ 可运行 Gradle | 编译任务仍需 JDK 26 toolchain；请通过 `org.gradle.java.installations.paths` 配置本地 JDK 路径 |
+| **JDK 26** | ✅ 推荐 | 项目默认 `jvmToolchain(26)`，与编译目标一致 |
+| **JDK 27+** | ❌ 不支持 | Gradle 9.5 / Kotlin 2.4.0 尚未支持 |
 
-> 当前 Kotlin 2.0.21 最高支持到 **JVM target 22**。若需支持 JDK 25/26，必须升级 Gradle 至 8.12+、Kotlin 至 2.1.x+。
+> 当前配置：Gradle 9.5.1 + Kotlin 2.4.0 + Compose Multiplatform 1.11.1。
 
 ## 常用构建命令
 
@@ -105,7 +104,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 ### 入口
 `me.yricky.oh.mcp.MainKt`
 
-### 暴露的 Tools（14 个）
+### 暴露的 Tools（16 个）
 
 #### ABC 字节码工具
 | Tool | 功能 |
@@ -119,6 +118,8 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 | `disassemble_method` | 获取方法的字节码反汇编 |
 | `get_method_info` | 获取方法详情（参数名、行号、调试信息） |
 | `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
+| `get_xrefs_to_field` | 查找字段的读取者和写入者（交叉引用） |
+| `search_in_method` | 在方法体内按正则搜索反汇编文本，返回匹配行及上下文 |
 
 #### HAP 包工具
 | Tool | 功能 |
@@ -246,10 +247,10 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - 表现为 `limitKeyConfigs()` 中读取到异常大的 `keyCount`，进而触发 `OutOfMemoryError`
    - `open_hap` 已增加降级处理避免崩溃，但 `search_resources` / `resolve_resource` 在该格式下仍无法工作
    - 需要对比新旧 Restool 格式差异，修正 `ResIndexBuf` 的解析偏移和字段布局
-8. **分块读取超大方法**
-   - 为 `decompile_method` 增加可选参数 `offset`/`limit`（按字符或按行），或新增 `decompile_method_chunk` 工具
-   - 使 LLM 可以逐段读取超过输出预算的超大方法，而不必一次性接收完整反编译结果
-   - 依赖已实现的 `MethodSummary` 与部分输出能力
+8. **方法内搜索** ✅
+   - 新增 `search_in_method` 工具：在指定方法内按正则搜索反汇编文本，返回匹配行及上下文
+   - 不触发完整反编译，因此适用于超大方法，不受 100 行展示上限和 10 MB 输出预算限制
+   - 可同时定位字符串常量、方法调用、字段访问等在方法体内的具体位置
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）

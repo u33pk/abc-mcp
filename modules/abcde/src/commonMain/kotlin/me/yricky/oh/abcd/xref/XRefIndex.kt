@@ -153,11 +153,6 @@ class XRefIndex private constructor(
                         visitExpression(expr.r, false)
                     }
                     is IrOp.UaExp -> visitExpression(expr.source, false)
-                    is IrOp.AssignObj -> {
-                        visitExpression(expr.left, true)
-                        visitExpression(expr.right, false)
-                    }
-                    is IrOp.AssignReg -> visitExpression(expr.right, false)
                     is IrOp.CallWithTarget -> visitExpression(expr.target, false)
                     is IrOp.ObjField -> visitExpression(expr.obj, false)
                     else -> { /* LoadReg, JustImm, NewClass, NewInst, CallAcc, DynamicImport 等无嵌套字段访问 */ }

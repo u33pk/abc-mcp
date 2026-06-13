@@ -377,7 +377,7 @@ class StructuredDecompilerTest {
                     for (method in classItem.methods) {
                         val code = method.codeItem ?: continue
                         val asm = Asm(code)
-                        val hasCopyRest = asm.irOpList.any { it is IrOp.CopyRestArgs }
+                        val hasCopyRest = asm.irOpList.any { op -> op is IrOp.AssignReg && op.right is IrOp.CopyRestArgs }
                         if (hasCopyRest) {
                             filesWithCopyRest++
                             methodsWithCopyRest++

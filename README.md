@@ -22,7 +22,7 @@
 | **字符串搜索** | 按正则搜索 ABC 中的字符串常量 |
 | **HAP 包解析** | 解析鸿蒙应用安装包，提取 module.json、ABC 文件、资源、混淆映射等 |
 | **资源索引解析** | 解析 `resources.index`，支持按名称/类型搜索资源 |
-| **MCP 服务** | 通过 stdio JSON-RPC 为 LLM 提供 14 个标准化工具 |
+| **MCP 服务** | 通过 stdio JSON-RPC 为 LLM 提供 16 个标准化工具 |
 
 ## 技术栈
 
@@ -35,16 +35,15 @@
 
 | JDK 版本 | 支持状态 | 说明 |
 |---------|---------|------|
-| **JDK 17** | ✅ 推荐 | 项目原生配置，最稳定 |
-| **JDK 21** | ✅ 可用 | 需将 `jvmToolchain(17)` 改为 `jvmToolchain(21)` |
-| **JDK 25** | ❌ 不支持 | 当前 Gradle 8.6 + Kotlin 2.0.21 无法识别/编译到 JDK 25 |
-| **JDK 26** | ❌ 不支持 | 当前 Gradle 8.6 + Kotlin 2.0.21 无法识别/编译到 JDK 26 |
+| **JDK 17 / 21** | ✅ 可运行 Gradle | 编译时仍需 JDK 26 toolchain，建议通过 `org.gradle.java.installations.paths` 配置 |
+| **JDK 26** | ✅ 推荐 | 当前默认 `jvmToolchain(26)`，与项目编译目标一致 |
+| **JDK 27+** | ❌ 不支持 | Gradle 9.5 / Kotlin 2.4.0 尚未支持 |
 
-> 如需支持 JDK 25/26，需升级 Gradle 至 8.12+、Kotlin 至 2.1.x+。
+> 当前配置：Gradle 9.5.1 + Kotlin 2.4.0 + Compose Multiplatform 1.11.1。
 
 ## 环境要求
 
-- JDK 17+（推荐 17，21 也可工作）
+- JDK 17+ 可运行 Gradle；编译需要 JDK 26（推荐与本项目 `jvmToolchain(26)` 一致）
 - 网络连接（首次构建需下载依赖）
 
 ## 快速开始
@@ -101,7 +100,7 @@ fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutin
 }
 ```
 
-## 可用工具（15 个）
+## 可用工具（16 个）
 
 ### ABC 字节码工具
 
@@ -113,10 +112,11 @@ fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutin
 | `decompile_class` | 反编译指定类的所有方法 |
 | `decompile_method` | 反编译指定方法 |
 | `search_strings` | 搜索字符串常量（正则匹配） |
-| `disassemble_method` | 获取方法的字节码反汇编 |
+| `disassemble_method` | 获取方法的字节码反汇编（含参数与注释） |
 | `get_method_info` | 获取方法详情（参数名、行号、调试信息） |
 | `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
 | `get_xrefs_to_field` | 查找字段的读取者和写入者（交叉引用） |
+| `search_in_method` | 在方法体内按正则搜索反汇编文本，返回匹配行及上下文 |
 
 ### HAP 包工具
 

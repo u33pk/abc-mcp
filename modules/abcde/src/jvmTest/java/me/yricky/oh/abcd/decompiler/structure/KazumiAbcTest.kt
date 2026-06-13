@@ -240,7 +240,7 @@ class KazumiAbcTest {
             for (method in classItem.methods) {
                 val code = method.codeItem ?: continue
                 val asm = Asm(code)
-                val hasRest = asm.irOpList.any { it is me.yricky.oh.abcd.decompiler.behaviour.IrOp.CopyRestArgs }
+                val hasRest = asm.irOpList.any { op -> op is me.yricky.oh.abcd.decompiler.behaviour.IrOp.AssignReg && op.right is me.yricky.oh.abcd.decompiler.behaviour.IrOp.CopyRestArgs }
                 val debugParams = (method as? me.yricky.oh.abcd.cfm.AbcMethod)?.debugInfo?.info?.params
                 val hasNamedParams = debugParams?.any { it.isNotEmpty() } == true
 
