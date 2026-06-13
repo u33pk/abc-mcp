@@ -195,9 +195,15 @@ _acc_ = AtkTsGlobal.print(_acc_);
 
 ## 待完成任务
 
-### 优先级 P1
-1. **参数名还原** - 从调试信息提取 `arg0` → `i`，`arg1` → `j`
-2. **copyrestargs 实现** - 剩余参数收集（目前是 UnImplemented）
+### 优先级 P1（已完成）
+1. **参数名还原** ✅
+   - `MethodItem.argsStr()` 优先读取 `DebugInfo.params`
+   - 无调试信息时回退到 `arg0`, `arg1`, ...
+2. **copyrestargs 实现** ✅
+   - 新增 `IrOp.CopyRestArgs(startIdx)`
+   - 支持 `copyrestargs`（`0xcf`）和 `wide.copyrestargs`（前缀 `0xfd` + `0x0b`）
+   - 代码生成器输出 `[vStart, ..., vEnd]` 形式的数组表达式
+   - 函数签名中对 rest 参数标注 `...name`
 
 ### 优先级 P2
 3. **增强常量折叠** - 嵌套常量、布尔简化

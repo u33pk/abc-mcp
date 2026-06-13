@@ -44,7 +44,8 @@ class StructuredToJs(val asm: Asm) {
         
         // 生成函数头（使用解码后的方法名）
         val methodName = decodeMethodName(asm.code.method)
-        sb.append("function $methodName${asm.code.method.argsStr()} {\n")
+        val restIndex = asm.irOpList.filterIsInstance<IrOp.CopyRestArgs>().firstOrNull()?.startIdx ?: -1
+        sb.append("function $methodName${asm.code.method.argsStr(restIndex)} {\n")
         
         // 生成函数体
         sb.append(generateRegion(region, 1))
@@ -234,6 +235,7 @@ class StructuredToJs(val asm: Asm) {
             is IrOp.LoadReg -> generateRegId(exp.regId)
             is IrOp.NewClass -> "/* newClass */"
             is IrOp.NewInst -> "new ${generateRegId(exp.clazz)}(${exp.constructorArgs.joinToString { generateRegId(it) }})"
+            is IrOp.CopyRestArgs -> "Array.prototype.slice.call(arguments, ${exp.startIdx})"
             is IrOp.ObjField.Index -> "${generateExpression(exp.obj)}[${exp.index}]"
             is IrOp.ObjField.Name -> "${generateExpression(exp.obj)}.${exp.name}"
             is IrOp.ObjField.Value -> "${generateExpression(exp.obj)}[${generateRegId(exp.value)}]"

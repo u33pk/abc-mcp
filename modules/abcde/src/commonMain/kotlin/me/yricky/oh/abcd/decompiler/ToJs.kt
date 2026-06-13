@@ -20,7 +20,8 @@ class ToJs(val asm: Asm) {
         val fc = FunctionDecompilerContext(enableOptimize)
         val sb = StringBuilder()
         val methodName = decodeMethodName(asm.code.method)
-        sb.append("function ").append(methodName).append(asm.code.method.argsStr()).append("{\n")
+        val restIndex = asm.irOpList.filterIsInstance<IrOp.CopyRestArgs>().firstOrNull()?.startIdx ?: -1
+        sb.append("function ").append(methodName).append(asm.code.method.argsStr(restIndex)).append("{\n")
         sb.append(fc.toJS(CodeSegment.genLinear(asm),1))
         sb.append("}")
         return ("${fc.imports.joinToString(separator = ";\n") { it.toString() }}\n" +
@@ -86,6 +87,7 @@ class ToJs(val asm: Asm) {
             is IrOp.LoadReg -> toJS(exp.regId)
             is IrOp.NewClass -> TODO("解析NewClass操作尚未实现")
             is IrOp.NewInst -> "new ${toJS(exp.clazz)}(${exp.constructorArgs.joinToString { toJS(it) }})"
+            is IrOp.CopyRestArgs -> "Array.prototype.slice.call(arguments, ${exp.startIdx})"
             is IrOp.ObjField.Index -> "${toJS(exp.obj)}[${exp.index}]"
             is IrOp.ObjField.Name -> "${toJS(exp.obj)}.${exp.name}"
             is IrOp.ObjField.Value -> "${toJS(exp.obj)}[${toJS(exp.value)}]"

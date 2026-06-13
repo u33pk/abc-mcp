@@ -26,6 +26,7 @@ sealed interface IrOp {
                     0xfc.toByte() -> Deprecated
                     0xfd.toByte() -> when(opCode){
                         0x0a.toByte() -> AssignObj(ObjField.Index(regId(item.opUnits[2]), item.opUnits[3].toUnsignedInt()), LoadReg.acc)
+                        0x0b.toByte() -> CopyRestArgs((item.opUnits[2] as Short).toUShort().toInt()).st2Acc()
                         0x11.toByte() -> LoadExternalModule(item.asm.code.method.clazz!!.moduleInfo!!.regularImports[item.opUnits[2].toUnsignedInt()]).st2Acc()
                         else -> UnImplemented(item)
                     }
@@ -235,7 +236,7 @@ sealed interface IrOp {
 
                 0xcb.toByte() -> AssignObj(ObjField.Index(regId(item.opUnits[2]),item.opUnits[3].toUnsignedInt()), LoadReg.acc)
 
-                0xcf.toByte() -> UnImplemented(item) // copyrestargs - 需要更复杂的实现
+                0xcf.toByte() -> CopyRestArgs(item.opUnits[1].toUnsignedInt()).st2Acc()
 
                 0xd3.toByte() -> JSValue.BigInt((item.ins.format[1] as InstFmt.SId).getString(item)).just().st2Acc()
 
@@ -376,6 +377,12 @@ sealed interface IrOp {
     }
     class LoadExternalModule(val ext: ModuleLiteralArray.RegularImport): NoRegExpression
     class GetModuleNamespace(val ns: OhmUrl) : NoRegExpression
+
+    /**
+     * 收集剩余参数（rest parameters）
+     * @param startIdx rest 参数在形参列表中的起始位置（0-based，从第一个实际参数开始计数）
+     */
+    class CopyRestArgs(val startIdx: Int) : NoRegExpression
 
     /**
      * 一元表达式

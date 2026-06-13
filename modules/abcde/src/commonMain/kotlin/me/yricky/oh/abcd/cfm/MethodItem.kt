@@ -250,21 +250,27 @@ sealed class MethodTag{
     }
 }
 
-fun MethodItem.argsStr():String{
-    if(this is AbcMethod && codeItem != null){
+fun MethodItem.argsStr(restIndex: Int = -1): String {
+    if (this is AbcMethod && codeItem != null) {
         val code = codeItem!!
+        val debugParams = debugInfo?.info?.params
         val argCount = code.numArgs - 3
-        if(argCount == 0){
-            return "(FunctionObject, NewTarget, this)"
-        }
+
         val sb = StringBuilder()
-        if(argCount >= 0){
-            sb.append("(FunctionObject, NewTarget, this")
-            repeat(argCount){
-                sb.append(", arg$it")
+        sb.append("(FunctionObject, NewTarget, this")
+        if (argCount > 0) {
+            repeat(argCount) { idx ->
+                val name = debugParams?.getOrNull(idx)?.takeIf { it.isNotEmpty() } ?: "arg$idx"
+                val displayName = if (idx == restIndex) "...$name" else name
+                sb.append(", ").append(displayName)
             }
-            sb.append(')')
         }
+        // rest 参数未计入 numArgs 时，restIndex 会大于等于 argCount，此时在末尾追加 ...rest
+        if (restIndex >= 0 && restIndex >= argCount) {
+            val restName = debugParams?.getOrNull(restIndex)?.takeIf { it.isNotEmpty() } ?: "arg$restIndex"
+            sb.append(", ...").append(restName)
+        }
+        sb.append(')')
         return sb.toString()
     } else {
         return ""
