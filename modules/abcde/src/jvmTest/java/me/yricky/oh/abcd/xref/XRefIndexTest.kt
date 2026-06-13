@@ -79,6 +79,41 @@ class XRefIndexTest {
     }
 
     @Test
+    fun testClassInstantiationXRefExists() {
+        if (!abcFile.exists()) {
+            println("Kazumi ABC file not found, skip")
+            return
+        }
+
+        val mmap = FileChannel.open(abcFile.toPath())
+            .map(FileChannel.MapMode.READ_ONLY, 0, abcFile.length())
+        val abc = AbcBuf(abcFile.name, wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+
+        val index = XRefIndex.build(abc)
+
+        println("Total classes with instantiations: ${index.classInstantiations.size}")
+        index.classInstantiations.entries
+            .sortedByDescending { it.value.size }
+            .take(10)
+            .forEach { (className, locs) ->
+                println("  $className: ${locs.size}")
+            }
+
+        val targetClassName = index.classInstantiations.entries
+            .maxByOrNull { it.value.size }
+            ?.key
+        assertTrue("Should find at least one class instantiation", targetClassName != null)
+
+        val instantiations = index.getInstantiations(targetClassName!!)
+        println("Class $targetClassName instantiations: ${instantiations.size}")
+        instantiations.take(5).forEach {
+            println("  - ${it.callerFullName} @ 0x${it.codeOffset.toString(16)}")
+        }
+
+        assertTrue("Top instantiated class should have multiple instantiations", instantiations.size >= 2)
+    }
+
+    @Test
     fun testIndexIsReusable() {
         if (!abcFile.exists()) {
             println("Kazumi ABC file not found, skip")

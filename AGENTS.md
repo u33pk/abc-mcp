@@ -104,7 +104,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 ### 入口
 `me.yricky.oh.mcp.MainKt`
 
-### 暴露的 Tools（16 个）
+### 暴露的 Tools（17 个）
 
 #### ABC 字节码工具
 | Tool | 功能 |
@@ -119,6 +119,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 | `get_method_info` | 获取方法详情（参数名、行号、调试信息） |
 | `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
 | `get_xrefs_to_field` | 查找字段的读取者和写入者（交叉引用） |
+| `get_xrefs_to_class` | 查找类的实例化位置（交叉引用） |
 | `search_in_method` | 在方法体内按正则搜索反汇编文本，返回匹配行及上下文 |
 
 #### HAP 包工具
@@ -233,10 +234,11 @@ _acc_ = AtkTsGlobal.print(_acc_);
 ### 优先级 P2
 3. **增强常量折叠** - 嵌套常量、布尔简化
 4. **重复 Load 消除** - 消除冗余的对象字段读取
-5. **交叉引用分析** - 查找方法/字段的调用者
+5. **交叉引用分析** - 查找方法/字段/类的调用者与实例化位置
    - ✅ 方法调用 xref 已实现：`get_xrefs_to_method` 工具 + `XRefIndex` 索引 + `SessionManager` 缓存
    - ✅ 字段读写 xref 已实现：`get_xrefs_to_field` 工具，支持 `this.fieldName` 精确索引与同名字段兜底索引
-   - 待扩展：类实例化/使用引用
+   - ✅ 类实例化 xref 已实现：`get_xrefs_to_class` 工具，索引 `NewClass` 与 `NewInst`（后者采用方法级寄存器回溯启发式）
+   - 待扩展：类使用引用（如 `instanceof`、`extends`、类型标注）
 6. **优化反编译输出中的方法名显示** ✅
    - 已去掉 `TAG_NORMAL` 返回的 `function ` 前缀，解决 `function function [ANONYMOUS]` 问题
    - 已在 `decodeMethodName` 中剥离 `^N` 变体编号后缀

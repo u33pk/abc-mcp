@@ -3,7 +3,9 @@ package me.yricky.oh.abcd.xref
 import me.yricky.oh.abcd.AbcBuf
 import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.abcd.cfm.AbcMethod
+import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
+import me.yricky.oh.abcd.decompiler.behaviour.JSValue
 import me.yricky.oh.abcd.decompiler.structure.decodeMethodName
 import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.abcd.isa.calledMethods
@@ -30,6 +32,8 @@ class XRefIndex private constructor(
     val nameBasedFieldReaders: Map<String, List<XRefLocation>>,
     /** 字段名 -> 写入它的位置列表（对象类型未知时的兜底索引） */
     val nameBasedFieldWriters: Map<String, List<XRefLocation>>,
+    /** 类名 -> 实例化它的位置列表 */
+    val classInstantiations: Map<String, List<XRefLocation>>,
 ) {
     /**
      * 查询方法的调用者（谁调用了这个方法）
@@ -66,6 +70,13 @@ class XRefIndex private constructor(
         return nameBasedFieldWriters[fieldName] ?: emptyList()
     }
 
+    /**
+     * 查询类的实例化位置（谁在 new 这个类）
+     */
+    fun getInstantiations(className: String): List<XRefLocation> {
+        return classInstantiations[className] ?: emptyList()
+    }
+
     companion object {
         /**
          * 从 [AbcBuf] 构建交叉引用索引
@@ -76,12 +87,14 @@ class XRefIndex private constructor(
             val fieldWriters = mutableMapOf<Pair<String, String>, MutableList<XRefLocation>>()
             val nameBasedReaders = mutableMapOf<String, MutableList<XRefLocation>>()
             val nameBasedWriters = mutableMapOf<String, MutableList<XRefLocation>>()
+            val classInstantiations = mutableMapOf<String, MutableList<XRefLocation>>()
 
             for (classItem in abc.classes.values) {
                 if (classItem !is AbcClass) continue
                 for (method in classItem.methods) {
                     val code = method.codeItem ?: continue
                     val asm = Asm(code)
+                    val regExpressionMap = buildRegExpressionMap(asm)
                     for (item in asm.list) {
                         // 方法调用 xref
                         for (callee in item.calledMethods) {
@@ -118,6 +131,18 @@ class XRefIndex private constructor(
                             fieldWriters.getOrPut(classItem.name to fieldAccess.name) { mutableListOf() }.add(loc)
                             nameBasedWriters.getOrPut(fieldAccess.name) { mutableListOf() }.add(loc)
                         }
+
+                        // 类实例化 xref
+                        val instantiatedClasses = collectInstantiations(item.irOp, regExpressionMap)
+                        for (instantiatedClass in instantiatedClasses) {
+                            val loc = XRefLocation(
+                                callerClass = classItem.name,
+                                callerMethod = method.name,
+                                callerDecodedName = decodeMethodName(method),
+                                codeOffset = item.codeOffset
+                            )
+                            classInstantiations.getOrPut(instantiatedClass) { mutableListOf() }.add(loc)
+                        }
                     }
                 }
             }
@@ -128,6 +153,7 @@ class XRefIndex private constructor(
                 fieldWriters = fieldWriters.mapValues { it.value.toList() },
                 nameBasedFieldReaders = nameBasedReaders.mapValues { it.value.toList() },
                 nameBasedFieldWriters = nameBasedWriters.mapValues { it.value.toList() },
+                classInstantiations = classInstantiations.mapValues { it.value.toList() },
             )
         }
 
@@ -175,6 +201,88 @@ class XRefIndex private constructor(
 
             visitStatement(irOp)
             return reads to writes
+        }
+
+        /**
+         * 线性扫描方法，建立寄存器到最近表达式的映射（用于 NewInst 类名回溯）。
+         */
+        private fun buildRegExpressionMap(asm: Asm): Map<FunSimCtx.RegId, IrOp.Expression> {
+            val map = mutableMapOf<FunSimCtx.RegId, IrOp.Expression>()
+            for (item in asm.list) {
+                val op = item.irOp
+                if (op is IrOp.AssignReg) {
+                    map[op.left] = op.right
+                }
+            }
+            return map
+        }
+
+        /**
+         * 从寄存器出发，尝试解析出类名。
+         */
+        private fun resolveClassName(
+            regId: FunSimCtx.RegId,
+            regMap: Map<FunSimCtx.RegId, IrOp.Expression>,
+            visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()
+        ): String? {
+            if (!visited.add(regId)) return null
+            return when (val expr = regMap[regId]) {
+                is IrOp.JustImm -> (expr.value as? JSValue.Function)?.method?.clazz?.name
+                is IrOp.LoadReg -> resolveClassName(expr.regId, regMap, visited)
+                is IrOp.LoadExternalModule -> expr.ext.localName
+                else -> null
+            }
+        }
+
+        /**
+         * 从一条 IR 指令中收集实例化的类名。
+         */
+        private fun collectInstantiations(
+            irOp: IrOp,
+            regMap: Map<FunSimCtx.RegId, IrOp.Expression>
+        ): List<String> {
+            val result = mutableListOf<String>()
+
+            fun visitExpr(expr: IrOp.Expression) {
+                when (expr) {
+                    is IrOp.NewClass -> {
+                        expr.constructor.method.clazz?.name?.let { result.add(it) }
+                    }
+                    is IrOp.NewInst -> {
+                        resolveClassName(expr.clazz, regMap)?.let { result.add(it) }
+                    }
+                    is IrOp.BiExp -> {
+                        visitExpr(expr.l)
+                        visitExpr(expr.r)
+                    }
+                    is IrOp.UaExp -> visitExpr(expr.source)
+                    is IrOp.CallWithTarget -> visitExpr(expr.target)
+                    is IrOp.ObjField.Name -> visitExpr(expr.obj)
+                    is IrOp.ObjField.Index -> visitExpr(expr.obj)
+                    is IrOp.ObjField.Value -> {
+                        visitExpr(expr.obj)
+                        visitExpr(IrOp.LoadReg(expr.value))
+                    }
+                    else -> { /* LoadReg, JustImm, DynamicImport, LoadExternalModule 等不会直接产生实例化 */ }
+                }
+            }
+
+            fun visitStmt(stmt: IrOp) {
+                when (stmt) {
+                    is IrOp.AssignReg -> visitExpr(stmt.right)
+                    is IrOp.AssignObj -> {
+                        visitExpr(stmt.left)
+                        visitExpr(stmt.right)
+                    }
+                    is IrOp.JumpIf -> visitExpr(stmt.condition)
+                    is IrOp.DeleteProp -> { /* 动态删除，不记录 */ }
+                    is IrOp.DefineGetterSetter -> { /* 动态 getter/setter，不记录 */ }
+                    else -> { /* NOP, Jump, Return, Throw, UnImplemented 等 */ }
+                }
+            }
+
+            visitStmt(irOp)
+            return result
         }
     }
 }
