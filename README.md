@@ -28,7 +28,6 @@
 
 - **语言**：Kotlin Multiplatform（核心为 JVM）
 - **构建**：Gradle Kotlin DSL
-- **GUI**：Jetpack Compose Desktop（桌面查看器，非核心）
 - **依赖**：kotlinx-serialization-json、BouncyCastle
 
 ## JDK 支持情况
@@ -62,12 +61,6 @@ java -jar modules/mcp/build/libs/mcp-*-fat.jar
 ```
 
 fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutines 等所有依赖。
-
-### 3. 构建桌面 GUI
-
-```bash
-./gradlew :abcdecoder:packageReleaseUberJarForCurrentOS
-```
 
 ## MCP 服务配置
 
@@ -133,16 +126,6 @@ fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutin
 |------|------|
 | `search_resources` | 搜索资源（按名称、类型） |
 | `resolve_resource` | 解析 `$string:app_name` 等资源引用 |
-
-## 命令行工具
-
-```bash
-# 导出 ABC 中的类列表
-java -jar /path/to/abcdecoder.jar --cli --dump-class /path/to/module.abc [--out=out.txt]
-
-# 导出资源索引
-java -jar /path/to/abcdecoder.jar --cli --dump-index /path/to/resources.index [--out=out.json]
-```
 
 ## 测试
 

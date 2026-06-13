@@ -28,4 +28,5 @@ include(":modules:mcp")
 include(":examples:findStr")
 include(":examples:abclen")
 
-include("abcdecoder")
+// GUI 桌面查看器模块，当前项目以 MCP 为核心，暂不参与构建
+// include("abcdecoder")

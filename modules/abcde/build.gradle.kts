@@ -102,6 +102,7 @@ kotlin {
 
 tasks.withType<Test> {
     jvmArgs("-Xmx8192m")
+    environment("abcPath", "/Users/vv/project/unitTest/kazumi/ets/modules.abc")
 }
 
 fun KotlinSourceSet.prepareIsaResource():File{

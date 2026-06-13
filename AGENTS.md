@@ -12,7 +12,6 @@
 ## 技术栈
 
 - **语言**：Kotlin Multiplatform（核心为 JVM）
-- **GUI**：Jetpack Compose Desktop（非核心）
 - **构建**：Gradle (Kotlin DSL)
 - **Kotlin 版本**：2.4.0
 - **Gradle 版本**：9.5.1
@@ -70,9 +69,6 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 
 # 构建 MCP 可运行 fat jar（包含所有依赖）
 ./gradlew :modules:mcp:fatJar
-
-# 构建桌面 GUI 的 UberJar
-./gradlew :abcdecoder:packageReleaseUberJarForCurrentOS
 
 # 发布到本地 Maven
 ./gradlew publishToMavenLocal

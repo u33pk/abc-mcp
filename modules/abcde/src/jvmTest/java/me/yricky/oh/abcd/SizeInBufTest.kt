@@ -10,7 +10,7 @@ import org.junit.Test
 
 
 class SizeInBufTest {
-    val file = File("/Users/yricky/Downloads/modules.abc")
+    val file = File("/Users/vv/project/unitTest/kazumi/ets/modules.abc")
     val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
     val abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
 

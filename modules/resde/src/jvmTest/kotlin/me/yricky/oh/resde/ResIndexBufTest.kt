@@ -1,6 +1,7 @@
 package me.yricky.oh.resde
 
 import me.yricky.oh.common.wrapAsLEByteBuf
+import org.junit.Assume
 import org.junit.Test
 
 import org.junit.Assert.*
@@ -10,9 +11,12 @@ import java.nio.channels.FileChannel
 
 class ResIndexBufTest {
 
-    val file = File("/Users/yricky/Downloads/ohbili/resources.index")
-    val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
-    val res = ResIndexBuf(wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+    val file = File("/Users/vv/project/unitTest/kazumi/test_resources.index")
+    val mmap by lazy {
+        Assume.assumeTrue("Test resources.index not found: $file", file.exists())
+        FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
+    }
+    val res by lazy { ResIndexBuf(wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN))) }
 
 
     @Test
