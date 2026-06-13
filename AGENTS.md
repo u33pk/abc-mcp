@@ -235,10 +235,11 @@ _acc_ = AtkTsGlobal.print(_acc_);
 5. **交叉引用分析** - 查找方法/字段的调用者
    - ✅ 方法调用 xref 已实现：`get_xrefs_to_method` 工具 + `XRefIndex` 索引 + `SessionManager` 缓存
    - 待扩展：字段读写引用、类实例化/使用引用
-6. **优化反编译输出中的方法名显示**
-   - 当前匿名函数输出为 `function function [ANONYMOUS](...)`，存在重复的 `function` 关键字
-   - 编译器生成的变体编号（如 `foo^1`）可读性较差
-   - 需要统一 `decodeMethodName` 与反编译器模板的命名策略
+6. **优化反编译输出中的方法名显示** ✅
+   - 已去掉 `TAG_NORMAL` 返回的 `function ` 前缀，解决 `function function [ANONYMOUS]` 问题
+   - 已在 `decodeMethodName` 中剥离 `^N` 变体编号后缀
+   - 已合并 `StructuredToJs` 与 `ToJs` 中重复的 `decodeMethodName` 实现
+   - 输出统一为 `function foo(...)` / `function [ANONYMOUS](...)` / `function constructor(...)` / `function static foo(...)`
 7. **资源索引解析器 `ResIndexBuf` 兼容性**
    - 当前解析器无法正确解析 RestoolV2 6.1.0.003 格式（Kazumi HAP 的 `resources.index`）
    - 表现为 `limitKeyConfigs()` 中读取到异常大的 `keyCount`，进而触发 `OutOfMemoryError`

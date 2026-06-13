@@ -2,6 +2,7 @@ package me.yricky.oh.abcd.decompiler
 
 import me.yricky.oh.abcd.cfm.AbcMethod
 import me.yricky.oh.abcd.cfm.argsStr
+import me.yricky.oh.abcd.decompiler.structure.decodeMethodName
 import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.JSValue
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
@@ -332,17 +333,4 @@ class ToJs(val asm: Asm) {
         }
     }
 
-    companion object {
-        /**
-         * 解码方法名为可读格式
-         */
-        fun decodeMethodName(method: AbcMethod): String {
-            val scopeInfo = AbcMethod.ScopeInfo.parseFromMethod(method)
-            return if (scopeInfo != null) {
-                scopeInfo.decorateMethodName(method)
-            } else {
-                method.name
-            }
-        }
-    }
 }

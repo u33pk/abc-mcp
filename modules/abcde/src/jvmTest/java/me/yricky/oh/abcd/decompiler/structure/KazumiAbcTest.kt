@@ -149,6 +149,39 @@ class KazumiAbcTest {
     }
 
     @Test
+    fun testMethodNameDisplay() {
+        if (!abcFile.exists()) {
+            println("ABC file not found")
+            return
+        }
+
+        val mmap = FileChannel.open(abcFile.toPath())
+            .map(FileChannel.MapMode.READ_ONLY, 0, abcFile.length())
+        val abc = AbcBuf(abcFile.name, wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+
+        var checked = 0
+        for (classItem in abc.classes.values) {
+            if (classItem !is AbcClass) continue
+            for (method in classItem.methods) {
+                val code = method.codeItem ?: continue
+                val asm = Asm(code)
+                val result = StructuredDecompiler.decompile(asm)
+
+                // 不应出现重复的 function 关键字
+                assertTrue("Output should not contain 'function function' for ${classItem.name}.${method.name}",
+                    !result.contains("function function"))
+
+                // 方法头中不应出现 ^N 变体编号（只检查以 function 开头的行）
+                assertTrue("Method header should not contain variant suffix for ${classItem.name}.${method.name}",
+                    !result.contains(Regex("(?m)^function [^\\n]*\\^[0-9]+")))
+
+                checked++
+                if (checked >= 50) return
+            }
+        }
+    }
+
+    @Test
     fun dumpSampleMethods() {
         if (!abcFile.exists()) {
             println("ABC file not found")

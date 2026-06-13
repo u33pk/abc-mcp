@@ -18,14 +18,17 @@ import me.yricky.oh.abcd.literal.ModuleLiteralArray
  * #~A=#A → constructor
  * #~A>#loop → loop
  * #~A<#foo → foo
+ *
+ * 同时剥离方舟编译器生成的变体编号后缀（如 foo^1 → foo）。
  */
 fun decodeMethodName(method: AbcMethod): String {
     val scopeInfo = AbcMethod.ScopeInfo.parseFromMethod(method)
-    return if (scopeInfo != null) {
+    val raw = if (scopeInfo != null) {
         scopeInfo.decorateMethodName(method)
     } else {
         method.name
     }
+    return raw.replace(Regex("\\^[0-9]+$"), "")
 }
 
 /**

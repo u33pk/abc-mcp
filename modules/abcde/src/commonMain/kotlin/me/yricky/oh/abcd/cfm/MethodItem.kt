@@ -161,7 +161,7 @@ class AbcMethod(abc: AbcBuf, offset: Int) :MethodItem(abc, offset), SizeInBuf.Ex
                 return when(tag){
                     TAG_INSTANCE -> name.ifEmpty { ANONYMOUS_NAME }
                     TAG_CONSTRUCTOR -> "constructor"
-                    else -> "${TAN_NAME_MAP[tag]} ${name.ifEmpty { ANONYMOUS_NAME }}"
+                    else -> name.ifEmpty { ANONYMOUS_NAME }
                 }
             }
         }
