@@ -102,6 +102,10 @@ kotlin {
     }
 }
 
+tasks.withType<Test> {
+    jvmArgs("-Xmx8192m")
+}
+
 fun KotlinSourceSet.prepareIsaResource():File{
     println("prepareIsaResource")
     val gson = GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create()
