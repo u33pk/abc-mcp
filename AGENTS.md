@@ -87,11 +87,15 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 
 # 运行单个文件测试
 ./gradlew :modules:abcde:jvmTest --tests "me.yricky.oh.abcd.decompiler.structure.StructuredDecompilerTest.testSpecificFile"
+
+# 运行 MCP tool 测试
+./gradlew :modules:mcp:jvmTest
 ```
 
 测试文件路径（参考）：
-- 源码：`/home/orz/project/unitTest/`
-- ABC 文件：`/home/orz/project/unitTest/out/`
+- 源码：`/Users/vv/project/unitTest/`
+- ABC 文件：`/Users/vv/project/unitTest/out/`
+- HAP 文件：`/Users/vv/project/unitTest/kazumi/Kazumi_ohos_2.1.5_unsigned.hap`
 
 ## MCP 服务
 
@@ -193,17 +197,26 @@ _acc_ = AtkTsGlobal.print(_acc_);
 - `#~A>#loop` → `loop`
 - `#~A<#foo` → `static foo`
 
-## 待完成任务
+## 已实现功能
 
-### 优先级 P1（已完成）
-1. **参数名还原** ✅
+### P1（代码已实现，待更充分的测试数据验证）
+1. **参数名还原**
    - `MethodItem.argsStr()` 优先读取 `DebugInfo.params`
    - 无调试信息时回退到 `arg0`, `arg1`, ...
-2. **copyrestargs 实现** ✅
+   - ⚠️ 当前 `/Users/vv/project/unitTest/out` 官方测试 ABC 的 `DbgInfo.params` 均为空，尚未在真实数据中验证还原效果
+2. **copyrestargs 实现**
    - 新增 `IrOp.CopyRestArgs(startIdx)`
    - 支持 `copyrestargs`（`0xcf`）和 `wide.copyrestargs`（前缀 `0xfd` + `0x0b`）
-   - 代码生成器输出 `[vStart, ..., vEnd]` 形式的数组表达式
    - 函数签名中对 rest 参数标注 `...name`
+   - ⚠️ 当前测试集（含 Kazumi HAP）中未找到使用 `copyrestargs` 指令的方法，尚未在真实数据中验证
+
+## 待完成任务
+
+### 优先级 P1
+1. **验证参数名还原效果**
+   - 需要找到携带 `DebugInfo.params` 的 ABC/HAP 文件，确认 `arg0` → 真实参数名的还原正确
+2. **验证 copyrestargs 效果**
+   - 需要找到包含 `copyrestargs` / `wide.copyrestargs` 指令的 ABC 文件，确认反编译输出和 rest 签名标注正确
 
 ### 优先级 P2
 3. **增强常量折叠** - 嵌套常量、布尔简化
@@ -213,6 +226,15 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - 当前匿名函数输出为 `function function [ANONYMOUS](...)`，存在重复的 `function` 关键字
    - 编译器生成的变体编号（如 `foo^1`）可读性较差
    - 需要统一 `decodeMethodName` 与反编译器模板的命名策略
+7. **资源索引解析器 `ResIndexBuf` 兼容性**
+   - 当前解析器无法正确解析 RestoolV2 6.1.0.003 格式（Kazumi HAP 的 `resources.index`）
+   - 表现为 `limitKeyConfigs()` 中读取到异常大的 `keyCount`，进而触发 `OutOfMemoryError`
+   - `open_hap` 已增加降级处理避免崩溃，但 `search_resources` / `resolve_resource` 在该格式下仍无法工作
+   - 需要对比新旧 Restool 格式差异，修正 `ResIndexBuf` 的解析偏移和字段布局
+
+### 已修复
+- ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）
+- ✅ `open_hap` 资源解析异常处理：捕获 `Throwable`，避免不兼容 `resources.index` 导致 OOM 崩溃
 
 ## 修改约定
 
