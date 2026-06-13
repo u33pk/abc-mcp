@@ -7,8 +7,8 @@ group = "me.yricky.oh"
 version = rootProject.version
 
 repositories {
-    mavenCentral()
-    google()
+    maven("https://maven.aliyun.com/repository/central")
+    maven("https://maven.aliyun.com/repository/public/")
 }
 
 kotlin {
@@ -27,6 +27,11 @@ kotlin {
                 implementation(project(":modules:hapde"))
                 implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.0")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+            }
+        }
+        jvmTest {
+            dependencies {
+                implementation("junit:junit:4.13.1")
             }
         }
     }

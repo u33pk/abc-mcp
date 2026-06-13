@@ -7,6 +7,8 @@ import java.io.File
 import java.util.zip.ZipFile
 
 class GetObfuscationMapTool : Tool {
+    private val json = Json { ignoreUnknownKeys = true }
+
     override val name = "get_obfuscation_map"
     override val description = "获取 HAP 包中的混淆映射（obfuscated → original 方法名）"
     override val inputSchema = buildJsonObject {
@@ -37,7 +39,7 @@ class GetObfuscationMapTool : Tool {
                 ?: return "Error: obfuscation.map not found in HAP"
 
             val content = zip.getInputStream(entry).reader().readText()
-            val nameCache = Json.decodeFromString<NameCache>(content)
+            val nameCache = json.decodeFromString<NameCache>(content)
 
             val regex = pattern?.let { Regex(it) }
             val sb = StringBuilder()

@@ -7,6 +7,8 @@ import java.io.File
 import java.util.zip.ZipFile
 
 class GetHapManifestTool : Tool {
+    private val json = Json { ignoreUnknownKeys = true }
+
     override val name = "get_hap_manifest"
     override val description = "获取 HAP 包的 module.json 清单内容"
     override val inputSchema = buildJsonObject {
@@ -31,7 +33,7 @@ class GetHapManifestTool : Tool {
                 ?: return "Error: module.json not found in HAP"
 
             val content = zip.getInputStream(entry).reader().readText()
-            val config = Json.decodeFromString<HapConfig>(content)
+            val config = json.decodeFromString<HapConfig>(content)
 
             val sb = StringBuilder()
             sb.appendLine("=== HAP Manifest ===")

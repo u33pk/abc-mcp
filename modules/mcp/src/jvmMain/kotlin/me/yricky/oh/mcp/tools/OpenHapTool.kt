@@ -15,6 +15,8 @@ import java.nio.channels.FileChannel
 import java.util.zip.ZipFile
 
 class OpenHapTool : Tool {
+    private val json = Json { ignoreUnknownKeys = true }
+
     override val name = "open_hap"
     override val description = "解析 HAP 包，列出基本信息、ABC 文件和资源"
     override val inputSchema = buildJsonObject {
@@ -44,7 +46,7 @@ class OpenHapTool : Tool {
             // Parse manifest
             val moduleJson = entries.find { it.name == "module.json" }
             if (moduleJson != null) {
-                val config = Json.decodeFromString<HapConfig>(
+                val config = json.decodeFromString<HapConfig>(
                     zip.getInputStream(moduleJson).reader().readText()
                 )
                 sb.appendLine("\n--- Manifest ---")
@@ -62,19 +64,24 @@ class OpenHapTool : Tool {
             // List resources
             val resIndex = entries.find { it.name == "resources.index" }
             if (resIndex != null) {
-                val tmpFile = File.createTempFile("res", ".index")
-                tmpFile.deleteOnExit()
-                zip.getInputStream(resIndex).transferTo(tmpFile.outputStream())
-                val resBuf = ResIndexBuf(wrapAsLEByteBuf(
-                    FileChannel.open(tmpFile.toPath())
-                        .map(FileChannel.MapMode.READ_ONLY, 0, tmpFile.length())
-                        .order(ByteOrder.LITTLE_ENDIAN)
-                ))
-                val allItems = resBuf.resMap.values.flatten()
-                sb.appendLine("\n--- Resources (${allItems.size} items) ---")
-                val byType = allItems.groupBy { it.resType.toString() }
-                byType.forEach { (type, items) ->
-                    sb.appendLine("  $type: ${items.size}")
+                try {
+                    val tmpFile = File.createTempFile("res", ".index")
+                    tmpFile.deleteOnExit()
+                    zip.getInputStream(resIndex).transferTo(tmpFile.outputStream())
+                    val resBuf = ResIndexBuf(wrapAsLEByteBuf(
+                        FileChannel.open(tmpFile.toPath())
+                            .map(FileChannel.MapMode.READ_ONLY, 0, tmpFile.length())
+                            .order(ByteOrder.LITTLE_ENDIAN)
+                    ))
+                    val allItems = resBuf.resMap.values.flatten()
+                    sb.appendLine("\n--- Resources (${allItems.size} items) ---")
+                    val byType = allItems.groupBy { it.resType.toString() }
+                    byType.forEach { (type, items) ->
+                        sb.appendLine("  $type: ${items.size}")
+                    }
+                } catch (e: Throwable) {
+                    sb.appendLine("\n--- Resources ---")
+                    sb.appendLine("  Error parsing resources.index: ${e.message}")
                 }
             }
 
