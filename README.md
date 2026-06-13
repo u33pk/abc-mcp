@@ -2,17 +2,27 @@
 
 > 基于 [Yricky/ABCDE](https://github.com/Yricky/ABCDE) 的 OpenHarmony 逆向分析工具链
 >
-> 原项目作者：**Yricky** | 原仓库：[https://github.com/Yricky/ABCDE](https://github.com/Yricky/ABCDE)
+> 将 ABCDE 的反编译能力封装为 **MCP（Model Context Protocol）服务**，让 Claude、Cursor 等 LLM 客户端能够直接分析鸿蒙应用（`.abc` / `.hap`）。
 
-本项目在 ABCDE 基础上聚焦 **MCP（Model Context Protocol）服务**，为 LLM 提供标准化的鸿蒙应用反编译与分析能力。
+## 项目特色
 
-## 核心能力
+- **LLM 原生设计**：所有能力以 MCP Tool 形式暴露，输入输出都对 LLM 友好。
+- **结构化反编译**：移植自 xpanda 的控制流分析算法，输出可读性更强的 `if` / `while` / `do-while` 结构，而非线性指令列表。
+- **超大方法安全**：对输出爆炸的方法实施多层防护（10 MB 服务端硬预算、100 行 LLM 展示上限、尾节点复制限制），截断时仍返回方法签名、前段代码和方法摘要。
+- **交叉引用（XRef）**：支持查找方法的调用者，帮助 LLM 快速追踪调用链。
+- **HAP 全栈解析**：同时支持 ABC 字节码、HAP 包结构、资源索引和混淆映射。
 
-- **ABC 字节码解析** - 解析方舟字节码文件中的类、方法、字段、字面量数组等
-- **反编译** - 将方舟字节码反编译为结构化的 JavaScript 代码
-- **HAP 包解析** - 解析鸿蒙应用安装包，提取配置、签名、资源等
-- **资源索引解析** - 解析 `resources.index` 文件，支持多语言/设备限定符
-- **MCP 服务** - 为 Claude、Cursor 等 LLM 客户端提供 13 个标准化工具
+## 核心功能
+
+| 能力 | 说明 |
+|------|------|
+| **ABC 字节码解析** | 解析方舟字节码中的类、方法、字段、字面量数组、调试信息等 |
+| **结构化反编译** | 将字节码反编译为 JavaScript/TypeScript 风格代码 |
+| **方法交叉引用** | 查找指定方法在哪些类/方法中被调用 |
+| **字符串搜索** | 按正则搜索 ABC 中的字符串常量 |
+| **HAP 包解析** | 解析鸿蒙应用安装包，提取 module.json、ABC 文件、资源、混淆映射等 |
+| **资源索引解析** | 解析 `resources.index`，支持按名称/类型搜索资源 |
+| **MCP 服务** | 通过 stdio JSON-RPC 为 LLM 提供 14 个标准化工具 |
 
 ## 技术栈
 
@@ -91,7 +101,7 @@ fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutin
 }
 ```
 
-## 可用工具（13 个）
+## 可用工具（14 个）
 
 ### ABC 字节码工具
 
@@ -105,6 +115,7 @@ fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutin
 | `search_strings` | 搜索字符串常量（正则匹配） |
 | `disassemble_method` | 获取方法的字节码反汇编 |
 | `get_method_info` | 获取方法详情（参数名、行号、调试信息） |
+| `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
 
 ### HAP 包工具
 
@@ -139,6 +150,12 @@ java -jar /path/to/abcdecoder.jar --cli --dump-index /path/to/resources.index [-
 
 # 运行单个文件测试
 ./gradlew :modules:abcde:jvmTest --tests "me.yricky.oh.abcd.decompiler.structure.StructuredDecompilerTest.testSpecificFile"
+
+# 运行交叉引用测试
+./gradlew :modules:abcde:jvmTest --tests "me.yricky.oh.abcd.xref.*"
+
+# 运行 MCP 工具测试
+./gradlew :modules:mcp:jvmTest
 ```
 
 ## 项目结构
@@ -158,10 +175,12 @@ modules/
 - [包体积分析工具示例](examples/abclen)
 - [字符串查找工具示例](examples/findStr)
 
-## 致谢
+## 基础项目、作者与开源协议
 
-本项目基于 [Yricky/ABCDE](https://github.com/Yricky/ABCDE) 构建，感谢原作者在 OpenHarmony 逆向领域的开源贡献。
+本项目基于 **[Yricky/ABCDE](https://github.com/Yricky/ABCDE)** 构建：
 
-## License
+- **原作者**：Yricky
+- **原项目地址**：[https://github.com/Yricky/ABCDE](https://github.com/Yricky/ABCDE)
+- **开源协议**：Apache License 2.0
 
-Apache License 2.0
+感谢原作者在 OpenHarmony 逆向领域的开源贡献。
