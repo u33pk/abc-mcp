@@ -101,7 +101,7 @@ fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutin
 }
 ```
 
-## 可用工具（14 个）
+## 可用工具（15 个）
 
 ### ABC 字节码工具
 
@@ -116,6 +116,7 @@ fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutin
 | `disassemble_method` | 获取方法的字节码反汇编 |
 | `get_method_info` | 获取方法详情（参数名、行号、调试信息） |
 | `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
+| `get_xrefs_to_field` | 查找字段的读取者和写入者（交叉引用） |
 
 ### HAP 包工具
 

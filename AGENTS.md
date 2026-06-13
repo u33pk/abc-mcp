@@ -234,7 +234,8 @@ _acc_ = AtkTsGlobal.print(_acc_);
 4. **重复 Load 消除** - 消除冗余的对象字段读取
 5. **交叉引用分析** - 查找方法/字段的调用者
    - ✅ 方法调用 xref 已实现：`get_xrefs_to_method` 工具 + `XRefIndex` 索引 + `SessionManager` 缓存
-   - 待扩展：字段读写引用、类实例化/使用引用
+   - ✅ 字段读写 xref 已实现：`get_xrefs_to_field` 工具，支持 `this.fieldName` 精确索引与同名字段兜底索引
+   - 待扩展：类实例化/使用引用
 6. **优化反编译输出中的方法名显示** ✅
    - 已去掉 `TAG_NORMAL` 返回的 `function ` 前缀，解决 `function function [ANONYMOUS]` 问题
    - 已在 `decodeMethodName` 中剥离 `^N` 变体编号后缀

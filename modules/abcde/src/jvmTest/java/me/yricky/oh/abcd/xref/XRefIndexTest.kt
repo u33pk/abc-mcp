@@ -45,6 +45,40 @@ class XRefIndexTest {
     }
 
     @Test
+    fun testFieldXRefExists() {
+        if (!abcFile.exists()) {
+            println("Kazumi ABC file not found, skip")
+            return
+        }
+
+        val mmap = FileChannel.open(abcFile.toPath())
+            .map(FileChannel.MapMode.READ_ONLY, 0, abcFile.length())
+        val abc = AbcBuf(abcFile.name, wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+
+        val index = XRefIndex.build(abc)
+
+        // 找一个在类内存在字段读写的 (类名, 字段名) 对
+        val targetEntry = index.fieldReaders.entries.firstOrNull { it.value.isNotEmpty() }
+            ?: index.fieldWriters.entries.firstOrNull { it.value.isNotEmpty() }
+        assertTrue("Should find at least one class-internal field reference", targetEntry != null)
+
+        val (key, _) = targetEntry!!
+        val (className, fieldName) = key
+        val readers = index.getFieldReaders(className, fieldName)
+        val writers = index.getFieldWriters(className, fieldName)
+        println("Field $className.$fieldName: readers=${readers.size}, writers=${writers.size}")
+        readers.take(5).forEach {
+            println("  read: ${it.callerFullName} @ 0x${it.codeOffset.toString(16)}")
+        }
+        writers.take(5).forEach {
+            println("  write: ${it.callerFullName} @ 0x${it.codeOffset.toString(16)}")
+        }
+
+        assertTrue("Field should have at least one read or write",
+            readers.isNotEmpty() || writers.isNotEmpty())
+    }
+
+    @Test
     fun testIndexIsReusable() {
         if (!abcFile.exists()) {
             println("Kazumi ABC file not found, skip")
