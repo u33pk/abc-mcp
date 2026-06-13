@@ -2,6 +2,7 @@ package me.yricky.oh.abcd.decompiler.structure
 
 import me.yricky.oh.abcd.AbcBuf
 import me.yricky.oh.abcd.cfm.AbcClass
+import me.yricky.oh.abcd.cfm.AbcMethod
 import me.yricky.oh.abcd.decompiler.CodeSegment
 import me.yricky.oh.abcd.decompiler.ToJs
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
@@ -15,7 +16,7 @@ import java.nio.channels.FileChannel
 
 class StructuredDecompilerTest {
     
-    private val testAbcDir = "/home/orz/project/unitTest/out"
+    private val testAbcDir = "/Users/vv/project/unitTest/out"
     
     @Test
     fun testAllAbcFiles() {
@@ -310,6 +311,136 @@ class StructuredDecompilerTest {
                 }
                 println()
             }
+        }
+    }
+
+    @Test
+    fun testSampleDecompilation() {
+        val files = listOf(
+            "call_dynamic.abc",
+            "getunmappedargs_dynamic.abc",
+            "gettemplateobject_dynamic.abc"
+        )
+
+        for (fileName in files) {
+            val abcFile = File(testAbcDir, fileName)
+            if (!abcFile.exists()) {
+                println("File not found: ${abcFile.absolutePath}")
+                continue
+            }
+
+            println("\n=== $fileName ===")
+            val mmap = FileChannel.open(abcFile.toPath())
+                .map(FileChannel.MapMode.READ_ONLY, 0, abcFile.length())
+            val abc = AbcBuf(abcFile.name, wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+
+            for ((offset, classItem) in abc.classes) {
+                if (classItem !is AbcClass) continue
+
+                for (method in classItem.methods) {
+                    val code = method.codeItem ?: continue
+                    val methodName = method.name
+                    if (!methodName.startsWith("func")) continue
+
+                    println("\n// Method: $methodName")
+                    try {
+                        val asm = Asm(code)
+                        val result = StructuredDecompiler.decompile(asm)
+                        println(result)
+                    } catch (e: Exception) {
+                        println("  Failed: ${e.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun scanCopyRestArgs() {
+        val unitTestDir = File("/Users/vv/project/unitTest")
+        val abcFiles = unitTestDir.walkTopDown().filter { it.isFile && it.extension == "abc" }.toList()
+        println("Scanning ${abcFiles.size} ABC files for copyrestargs...")
+
+        var filesWithCopyRest = 0
+        var methodsWithCopyRest = 0
+        val examples = mutableListOf<String>()
+
+        for (abcFile in abcFiles) {
+            try {
+                val mmap = FileChannel.open(abcFile.toPath())
+                    .map(FileChannel.MapMode.READ_ONLY, 0, abcFile.length())
+                val abc = AbcBuf(abcFile.name, wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+
+                for ((offset, classItem) in abc.classes) {
+                    if (classItem !is AbcClass) continue
+
+                    for (method in classItem.methods) {
+                        val code = method.codeItem ?: continue
+                        val asm = Asm(code)
+                        val hasCopyRest = asm.irOpList.any { it is IrOp.CopyRestArgs }
+                        if (hasCopyRest) {
+                            filesWithCopyRest++
+                            methodsWithCopyRest++
+                            if (examples.size < 10) {
+                                examples.add("${abcFile.name}/${method.name}")
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                println("Error scanning ${abcFile.name}: ${e.message}")
+            }
+        }
+
+        println("Files with copyrestargs: $filesWithCopyRest")
+        println("Methods with copyrestargs: $methodsWithCopyRest")
+        if (examples.isNotEmpty()) {
+            println("Examples:")
+            examples.forEach { println("  $it") }
+        }
+    }
+
+    @Test
+    fun scanDebugInfoParams() {
+        val unitTestDir = File("/Users/vv/project/unitTest")
+        val abcFiles = unitTestDir.walkTopDown().filter { it.isFile && it.extension == "abc" }.toList()
+        println("Scanning ${abcFiles.size} ABC files for debug parameter names...")
+
+        var filesWithParams = 0
+        var methodsWithParams = 0
+        val examples = mutableListOf<String>()
+
+        for (abcFile in abcFiles) {
+            try {
+                val mmap = FileChannel.open(abcFile.toPath())
+                    .map(FileChannel.MapMode.READ_ONLY, 0, abcFile.length())
+                val abc = AbcBuf(abcFile.name, wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+
+                for ((offset, classItem) in abc.classes) {
+                    if (classItem !is AbcClass) continue
+
+                    for (method in classItem.methods) {
+                        val abcMethod = method as? AbcMethod ?: continue
+                        val params = abcMethod.debugInfo?.info?.params
+                        if (!params.isNullOrEmpty()) {
+                            filesWithParams++
+                            methodsWithParams++
+                            if (examples.size < 10) {
+                                examples.add("${abcFile.name}/${method.name}: $params")
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                println("Error scanning ${abcFile.name}: ${e.message}")
+            }
+        }
+
+        println("Files with param names: $filesWithParams")
+        println("Methods with param names: $methodsWithParams")
+        if (examples.isNotEmpty()) {
+            println("Examples:")
+            examples.forEach { println("  $it") }
         }
     }
 
