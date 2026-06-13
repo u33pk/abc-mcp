@@ -175,6 +175,14 @@ modules/
 - [包体积分析工具示例](examples/abclen)
 - [字符串查找工具示例](examples/findStr)
 
+## 参考项目
+
+| 项目 | 说明 |
+|------|------|
+| [Yricky/ABCDE](https://github.com/Yricky/ABCDE) | 基础 ABC 解析与反编译项目，本项目在其上封装 MCP 服务 |
+| [asmjmp0/xpanda](https://github.com/asmjmp0/xpanda) | 已停止维护的鸿蒙反编译器，本项目的结构化控制流分析算法移植自此处 |
+| [skylot/jadx](https://github.com/skylot/jadx) | Android 反编译器，本项目的交叉引用索引与缓存设计借鉴了其 UsageInfo / IUsageInfoCache 架构 |
+
 ## 基础项目、作者与开源协议
 
 本项目基于 **[Yricky/ABCDE](https://github.com/Yricky/ABCDE)** 构建：
