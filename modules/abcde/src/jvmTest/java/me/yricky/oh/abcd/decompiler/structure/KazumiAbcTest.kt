@@ -175,6 +175,10 @@ class KazumiAbcTest {
                 assertTrue("Method header should not contain variant suffix for ${classItem.name}.${method.name}",
                     !result.contains(Regex("(?m)^function [^\\n]*\\^[0-9]+")))
 
+                // 匿名函数应显示为 anon_xxxxxxxx，而不是 [ANONYMOUS]
+                assertTrue("Anonymous function should use anon_ prefix for ${classItem.name}.${method.name}",
+                    !result.contains("function [ANONYMOUS]"))
+
                 checked++
                 if (checked >= 50) return
             }

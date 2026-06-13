@@ -20,6 +20,7 @@ import me.yricky.oh.abcd.literal.ModuleLiteralArray
  * #~A<#foo → foo
  *
  * 同时剥离方舟编译器生成的变体编号后缀（如 foo^1 → foo）。
+ * 匿名函数不再显示为 [ANONYMOUS]，而是生成稳定的短标识符 anon_xxxxxxxx。
  */
 fun decodeMethodName(method: AbcMethod): String {
     val scopeInfo = AbcMethod.ScopeInfo.parseFromMethod(method)
@@ -28,7 +29,22 @@ fun decodeMethodName(method: AbcMethod): String {
     } else {
         method.name
     }
-    return raw.replace(Regex("\\^[0-9]+$"), "")
+    val withoutVariant = raw.replace(Regex("\\^[0-9]+$"), "")
+    return if (withoutVariant.isEmpty() || withoutVariant == AbcMethod.ScopeInfo.ANONYMOUS_NAME) {
+        generateAnonymousName(method)
+    } else {
+        withoutVariant
+    }
+}
+
+/**
+ * 为匿名函数生成稳定的短标识符。
+ * 基于方法原始名、类名和 offset，确保同一方法始终得到同一名字，不同方法尽量唯一。
+ */
+private fun generateAnonymousName(method: AbcMethod): String {
+    val input = "${method.name}|${method.offset}|${method.clazz?.name ?: ""}"
+    val hash = input.fold(0L) { acc, c -> (acc * 31 + c.code) and 0xffffffffL }
+    return "anon_${hash.toString(16).padStart(8, '0')}"
 }
 
 /**
