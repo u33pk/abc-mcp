@@ -19,6 +19,7 @@ class ToolRegistry(private val sessionManager: SessionManager) {
         register(GetXrefsToMethodTool(sessionManager))
         register(GetXrefsToFieldTool(sessionManager))
         register(GetXrefsToClassTool(sessionManager))
+        register(GetClassHierarchyTool(sessionManager))
         register(SearchInMethodTool(sessionManager))
         // HAP tools
         register(OpenHapTool())

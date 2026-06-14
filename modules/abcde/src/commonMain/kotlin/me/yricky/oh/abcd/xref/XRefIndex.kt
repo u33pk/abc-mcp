@@ -34,6 +34,8 @@ class XRefIndex private constructor(
     val nameBasedFieldWriters: Map<String, List<XRefLocation>>,
     /** 类名 -> 实例化它的位置列表 */
     val classInstantiations: Map<String, List<XRefLocation>>,
+    /** 类名 -> 被 instanceof 检查的位置列表 */
+    val classInstanceOfs: Map<String, List<XRefLocation>>,
 ) {
     /**
      * 查询方法的调用者（谁调用了这个方法）
@@ -77,6 +79,13 @@ class XRefIndex private constructor(
         return classInstantiations[className] ?: emptyList()
     }
 
+    /**
+     * 查询类被 instanceof 检查的位置（谁在用 instanceof 判断这个类）
+     */
+    fun getInstanceOfs(className: String): List<XRefLocation> {
+        return classInstanceOfs[className] ?: emptyList()
+    }
+
     companion object {
         /**
          * 从 [AbcBuf] 构建交叉引用索引
@@ -88,6 +97,7 @@ class XRefIndex private constructor(
             val nameBasedReaders = mutableMapOf<String, MutableList<XRefLocation>>()
             val nameBasedWriters = mutableMapOf<String, MutableList<XRefLocation>>()
             val classInstantiations = mutableMapOf<String, MutableList<XRefLocation>>()
+            val classInstanceOfs = mutableMapOf<String, MutableList<XRefLocation>>()
 
             for (classItem in abc.classes.values) {
                 if (classItem !is AbcClass) continue
@@ -143,6 +153,18 @@ class XRefIndex private constructor(
                             )
                             classInstantiations.getOrPut(instantiatedClass) { mutableListOf() }.add(loc)
                         }
+
+                        // instanceof 类型检查 xref
+                        val instanceOfClasses = collectInstanceOfs(item.irOp, regExpressionMap)
+                        for (instanceOfClass in instanceOfClasses) {
+                            val loc = XRefLocation(
+                                callerClass = classItem.name,
+                                callerMethod = method.name,
+                                callerDecodedName = decodeMethodName(method),
+                                codeOffset = item.codeOffset
+                            )
+                            classInstanceOfs.getOrPut(instanceOfClass) { mutableListOf() }.add(loc)
+                        }
                     }
                 }
             }
@@ -154,6 +176,7 @@ class XRefIndex private constructor(
                 nameBasedFieldReaders = nameBasedReaders.mapValues { it.value.toList() },
                 nameBasedFieldWriters = nameBasedWriters.mapValues { it.value.toList() },
                 classInstantiations = classInstantiations.mapValues { it.value.toList() },
+                classInstanceOfs = classInstanceOfs.mapValues { it.value.toList() },
             )
         }
 
@@ -226,10 +249,22 @@ class XRefIndex private constructor(
             visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()
         ): String? {
             if (!visited.add(regId)) return null
-            return when (val expr = regMap[regId]) {
+            return resolveClassName(regMap[regId], regMap, visited)
+        }
+
+        /**
+         * 从表达式出发，尝试解析出类名。
+         */
+        private fun resolveClassName(
+            expr: IrOp.Expression?,
+            regMap: Map<FunSimCtx.RegId, IrOp.Expression>,
+            visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()
+        ): String? {
+            return when (expr) {
                 is IrOp.JustImm -> (expr.value as? JSValue.Function)?.method?.clazz?.name
                 is IrOp.LoadReg -> resolveClassName(expr.regId, regMap, visited)
                 is IrOp.LoadExternalModule -> expr.ext.localName
+                is IrOp.NewClass -> expr.constructor.method.clazz?.name
                 else -> null
             }
         }
@@ -264,6 +299,55 @@ class XRefIndex private constructor(
                         visitExpr(IrOp.LoadReg(expr.value))
                     }
                     else -> { /* LoadReg, JustImm, DynamicImport, LoadExternalModule 等不会直接产生实例化 */ }
+                }
+            }
+
+            fun visitStmt(stmt: IrOp) {
+                when (stmt) {
+                    is IrOp.AssignReg -> visitExpr(stmt.right)
+                    is IrOp.AssignObj -> {
+                        visitExpr(stmt.left)
+                        visitExpr(stmt.right)
+                    }
+                    is IrOp.JumpIf -> visitExpr(stmt.condition)
+                    is IrOp.DeleteProp -> { /* 动态删除，不记录 */ }
+                    is IrOp.DefineGetterSetter -> { /* 动态 getter/setter，不记录 */ }
+                    else -> { /* NOP, Jump, Return, Throw, UnImplemented 等 */ }
+                }
+            }
+
+            visitStmt(irOp)
+            return result
+        }
+
+        /**
+         * 从一条 IR 指令中收集 instanceof 检查的目标类名。
+         */
+        private fun collectInstanceOfs(
+            irOp: IrOp,
+            regMap: Map<FunSimCtx.RegId, IrOp.Expression>
+        ): List<String> {
+            val result = mutableListOf<String>()
+
+            fun visitExpr(expr: IrOp.Expression) {
+                when (expr) {
+                    is IrOp.BiExp.InstOf -> {
+                        resolveClassName(expr.l, regMap)?.let { result.add(it) }
+                        visitExpr(expr.r)
+                    }
+                    is IrOp.BiExp -> {
+                        visitExpr(expr.l)
+                        visitExpr(expr.r)
+                    }
+                    is IrOp.UaExp -> visitExpr(expr.source)
+                    is IrOp.CallWithTarget -> visitExpr(expr.target)
+                    is IrOp.ObjField.Name -> visitExpr(expr.obj)
+                    is IrOp.ObjField.Index -> visitExpr(expr.obj)
+                    is IrOp.ObjField.Value -> {
+                        visitExpr(expr.obj)
+                        visitExpr(IrOp.LoadReg(expr.value))
+                    }
+                    else -> { /* LoadReg, JustImm, NewClass, NewInst, CallAcc, DynamicImport 等不会直接产生 instanceof */ }
                 }
             }
 

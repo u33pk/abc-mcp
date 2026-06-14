@@ -34,6 +34,7 @@ class GetXrefsToClassToolTest {
         )
         println(result)
         assertTrue("Should report total instantiations", result.contains("Total instantiations:"))
+        assertTrue("Should report total instanceof checks", result.contains("Total instanceof checks:"))
         assertTrue("Should list at least one instantiation", result.contains("1."))
     }
 

@@ -37,16 +37,26 @@ class GetXrefsToClassTool(private val sessionManager: SessionManager) : Tool {
 
         val index = sessionManager.getXRefIndex(path)
         val instantiations = index.getInstantiations(className)
+        val instanceOfs = index.getInstanceOfs(className)
 
         val sb = StringBuilder()
         sb.appendLine("// Cross references to $className")
         sb.appendLine("// Total instantiations: ${instantiations.size}")
+        sb.appendLine("// Total instanceof checks: ${instanceOfs.size}")
         sb.appendLine()
 
         if (instantiations.isEmpty()) {
             sb.appendLine("// No instantiations found")
         } else {
             instantiations.forEachIndexed { idx, loc ->
+                sb.appendLine("${idx + 1}. ${loc.callerFullName} (offset 0x${loc.codeOffset.toString(16)})")
+            }
+        }
+
+        if (instanceOfs.isNotEmpty()) {
+            sb.appendLine()
+            sb.appendLine("// instanceof checks:")
+            instanceOfs.forEachIndexed { idx, loc ->
                 sb.appendLine("${idx + 1}. ${loc.callerFullName} (offset 0x${loc.codeOffset.toString(16)})")
             }
         }

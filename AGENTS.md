@@ -100,7 +100,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 ### 入口
 `me.yricky.oh.mcp.MainKt`
 
-### 暴露的 Tools（17 个）
+### 暴露的 Tools（18 个）
 
 #### ABC 字节码工具
 | Tool | 功能 |
@@ -115,7 +115,8 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 | `get_method_info` | 获取方法详情（参数名、行号、调试信息） |
 | `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
 | `get_xrefs_to_field` | 查找字段的读取者和写入者（交叉引用） |
-| `get_xrefs_to_class` | 查找类的实例化位置（交叉引用） |
+| `get_xrefs_to_class` | 查找类的实例化位置与 `instanceof` 检查位置（交叉引用） |
+| `get_class_hierarchy` | 查询类的父类、接口、子类与接口实现者 |
 | `search_in_method` | 在方法体内按正则搜索反汇编文本，返回匹配行及上下文 |
 
 #### HAP 包工具
@@ -234,7 +235,9 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - ✅ 方法调用 xref 已实现：`get_xrefs_to_method` 工具 + `XRefIndex` 索引 + `SessionManager` 缓存
    - ✅ 字段读写 xref 已实现：`get_xrefs_to_field` 工具，支持 `this.fieldName` 精确索引与同名字段兜底索引
    - ✅ 类实例化 xref 已实现：`get_xrefs_to_class` 工具，索引 `NewClass` 与 `NewInst`（后者采用方法级寄存器回溯启发式）
-   - 待扩展：类使用引用（如 `instanceof`、`extends`、类型标注）
+   - ✅ 类 `instanceof` 检查 xref 已实现：在 `XRefIndex` 中索引 `IrOp.BiExp.InstOf`，并在 `get_xrefs_to_class` 结果中展示
+   - ✅ 类层次结构查询已实现：`ClassHierarchyIndex` + `get_class_hierarchy` 工具，支持父类、接口、子类、接口实现者；对 ArkTS 编译的类还从 `NewClass` 指令的 parent 寄存器回溯 extends 关系，并将导入别名规范化为全限定类名
+   - 待扩展：类型标注引用（参数/变量类型标注）
 6. **优化反编译输出中的方法名显示** ✅
    - 已去掉 `TAG_NORMAL` 返回的 `function ` 前缀，解决 `function function [ANONYMOUS]` 问题
    - 已在 `decodeMethodName` 中剥离 `^N` 变体编号后缀
