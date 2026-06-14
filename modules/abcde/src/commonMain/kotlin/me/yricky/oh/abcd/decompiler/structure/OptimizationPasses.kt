@@ -6,6 +6,8 @@ import me.yricky.oh.abcd.decompiler.behaviour.JSValue
 import me.yricky.oh.abcd.decompiler.behaviour.assignLeftAcc
 import me.yricky.oh.abcd.decompiler.behaviour.assignRightAcc
 import me.yricky.oh.abcd.decompiler.behaviour.replaceReg
+import java.math.BigInteger
+import kotlin.math.pow
 
 /**
  * 优化 Pass 接口
@@ -28,177 +30,481 @@ object AlgebraicSimplificationPass : OptimizationPass {
             }
         }
     }
-    
+
     private fun simplifyExpression(expr: IrOp.Expression): IrOp.Expression {
         return when (expr) {
             is IrOp.BiExp.Add -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) -> r
-                    isZero(r) -> l
-                    else -> IrOp.BiExp.Add(l, r)
-                }
+                foldStringConcat(l, r)
+                    ?: foldBigIntBinary(l, r, BigInteger::add)
+                    ?: foldNumberBinary(l, r) { a, b -> a + b }
+                    ?: when {
+                        isZero(l) -> r
+                        isZero(r) -> l
+                        else -> IrOp.BiExp.Add(l, r)
+                    }
             }
             is IrOp.BiExp.Sub -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(r) -> l
-                    l == r -> zero()
-                    else -> IrOp.BiExp.Sub(l, r)
-                }
+                foldBigIntBinary(l, r, BigInteger::subtract)
+                    ?: foldNumberBinary(l, r) { a, b -> a - b }
+                    ?: when {
+                        isZero(r) -> l
+                        l == r -> zero()
+                        else -> IrOp.BiExp.Sub(l, r)
+                    }
             }
             is IrOp.BiExp.Mul -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) || isZero(r) -> zero()
-                    isOne(l) -> r
-                    isOne(r) -> l
-                    else -> IrOp.BiExp.Mul(l, r)
-                }
+                foldBigIntBinary(l, r, BigInteger::multiply)
+                    ?: foldNumberBinary(l, r) { a, b -> a * b }
+                    ?: when {
+                        isZero(l) || isZero(r) -> zero()
+                        isOne(l) -> r
+                        isOne(r) -> l
+                        else -> IrOp.BiExp.Mul(l, r)
+                    }
             }
             is IrOp.BiExp.Div -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) -> zero()
-                    isOne(r) -> l
-                    else -> IrOp.BiExp.Div(l, r)
-                }
+                foldBigIntBinary(l, r) { a, b -> if (b == BigInteger.ZERO) return@foldBigIntBinary null else a / b }
+                    ?: foldNumberBinary(l, r) { a, b -> a / b }
+                    ?: when {
+                        isZero(l) -> zero()
+                        isOne(r) -> l
+                        else -> IrOp.BiExp.Div(l, r)
+                    }
             }
             is IrOp.BiExp.Mod -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) -> zero()
-                    isOne(r) -> zero()
-                    else -> IrOp.BiExp.Mod(l, r)
-                }
+                foldBigIntBinary(l, r) { a, b -> if (b == BigInteger.ZERO) return@foldBigIntBinary null else a % b }
+                    ?: foldNumberBinary(l, r) { a, b -> a % b }
+                    ?: when {
+                        isZero(l) -> zero()
+                        isOne(r) -> zero()
+                        else -> IrOp.BiExp.Mod(l, r)
+                    }
             }
             is IrOp.BiExp.Shl -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) -> zero()
-                    isZero(r) -> l
-                    else -> IrOp.BiExp.Shl(l, r)
-                }
+                foldBitwiseBinary(l, r) { a, b -> a shl b }
+                    ?: when {
+                        isZero(l) -> zero()
+                        isZero(r) -> l
+                        else -> IrOp.BiExp.Shl(l, r)
+                    }
             }
             is IrOp.BiExp.Shr -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) -> zero()
-                    isZero(r) -> l
-                    else -> IrOp.BiExp.Shr(l, r)
-                }
+                foldUnsignedShift(l, r)
+                    ?: when {
+                        isZero(l) -> zero()
+                        isZero(r) -> l
+                        else -> IrOp.BiExp.Shr(l, r)
+                    }
             }
             is IrOp.BiExp.AShr -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) -> zero()
-                    isZero(r) -> l
-                    else -> IrOp.BiExp.AShr(l, r)
-                }
+                foldBitwiseBinary(l, r) { a, b -> a shr b }
+                    ?: when {
+                        isZero(l) -> zero()
+                        isZero(r) -> l
+                        else -> IrOp.BiExp.AShr(l, r)
+                    }
             }
             is IrOp.BiExp.And -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) || isZero(r) -> zero()
-                    else -> IrOp.BiExp.And(l, r)
-                }
+                foldBitwiseBinary(l, r) { a, b -> a and b }
+                    ?: when {
+                        isZero(l) || isZero(r) -> zero()
+                        else -> IrOp.BiExp.And(l, r)
+                    }
             }
             is IrOp.BiExp.Or -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) -> r
-                    isZero(r) -> l
-                    else -> IrOp.BiExp.Or(l, r)
-                }
+                foldBitwiseBinary(l, r) { a, b -> a or b }
+                    ?: when {
+                        isZero(l) -> r
+                        isZero(r) -> l
+                        else -> IrOp.BiExp.Or(l, r)
+                    }
             }
             is IrOp.BiExp.Xor -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(l) -> r
-                    isZero(r) -> l
-                    l == r -> zero()
-                    else -> IrOp.BiExp.Xor(l, r)
-                }
+                foldBitwiseBinary(l, r) { a, b -> a xor b }
+                    ?: when {
+                        isZero(l) -> r
+                        isZero(r) -> l
+                        l == r -> zero()
+                        else -> IrOp.BiExp.Xor(l, r)
+                    }
             }
             is IrOp.BiExp.Exp -> {
                 val l = simplifyExpression(expr.l)
                 val r = simplifyExpression(expr.r)
-                when {
-                    isZero(r) -> one()
-                    isOne(r) -> l
-                    else -> IrOp.BiExp.Exp(l, r)
-                }
+                foldBigIntExp(l, r)
+                    ?: foldNumberBinary(l, r) { a, b -> a.pow(b) }
+                    ?: when {
+                        isZero(r) -> one()
+                        isOne(r) -> l
+                        else -> IrOp.BiExp.Exp(l, r)
+                    }
+            }
+            is IrOp.BiExp.Eq -> {
+                val l = simplifyExpression(expr.l)
+                val r = simplifyExpression(expr.r)
+                foldAbstractEquality(l, r)?.let { boolExpr(it) }
+                    ?: IrOp.BiExp.Eq(l, r)
+            }
+            is IrOp.BiExp.NEq -> {
+                val l = simplifyExpression(expr.l)
+                val r = simplifyExpression(expr.r)
+                foldAbstractEquality(l, r)?.let { boolExpr(!it) }
+                    ?: IrOp.BiExp.NEq(l, r)
+            }
+            is IrOp.BiExp.StrictEq -> {
+                val l = simplifyExpression(expr.l)
+                val r = simplifyExpression(expr.r)
+                foldStrictEquality(l, r)?.let { boolExpr(it) }
+                    ?: IrOp.BiExp.StrictEq(l, r)
+            }
+            is IrOp.BiExp.StrictNEq -> {
+                val l = simplifyExpression(expr.l)
+                val r = simplifyExpression(expr.r)
+                foldStrictEquality(l, r)?.let { boolExpr(!it) }
+                    ?: IrOp.BiExp.StrictNEq(l, r)
+            }
+            is IrOp.BiExp.Less -> {
+                val l = simplifyExpression(expr.l)
+                val r = simplifyExpression(expr.r)
+                foldRelational(l, r) { a, b -> a < b }
+                    ?: IrOp.BiExp.Less(l, r)
+            }
+            is IrOp.BiExp.LEq -> {
+                val l = simplifyExpression(expr.l)
+                val r = simplifyExpression(expr.r)
+                foldRelational(l, r) { a, b -> a <= b }
+                    ?: IrOp.BiExp.LEq(l, r)
+            }
+            is IrOp.BiExp.Ge -> {
+                val l = simplifyExpression(expr.l)
+                val r = simplifyExpression(expr.r)
+                foldRelational(l, r) { a, b -> a >= b }
+                    ?: IrOp.BiExp.Ge(l, r)
+            }
+            is IrOp.BiExp.GEq -> {
+                val l = simplifyExpression(expr.l)
+                val r = simplifyExpression(expr.r)
+                foldRelational(l, r) { a, b -> a > b }
+                    ?: IrOp.BiExp.GEq(l, r)
             }
             // Unary expressions
             is IrOp.UaExp.Neg -> {
                 val s = simplifyExpression(expr.source)
-                when {
-                    isZero(s) -> s
-                    s is IrOp.JustImm && s.value is JSValue.Number -> IrOp.JustImm(JSValue.Number(-s.value.value.toDouble()))
-                    else -> IrOp.UaExp.Neg(s)
-                }
+                asNumber(s)?.let { numberExpr(-it) }
+                    ?: asBigInt(s)?.let { IrOp.JustImm(JSValue.BigInt(it.negate().toString())) }
+                    ?: IrOp.UaExp.Neg(s)
             }
             is IrOp.UaExp.Not -> {
                 val s = simplifyExpression(expr.source)
-                when {
-                    s is IrOp.JustImm && s.value is JSValue.Number -> IrOp.JustImm(JSValue.Number(s.value.value.toInt().inv()))
-                    else -> IrOp.UaExp.Not(s)
-                }
+                asNumber(s)?.toInt()?.let { numberExpr(it.inv().toDouble()) }
+                    ?: IrOp.UaExp.Not(s)
             }
             is IrOp.UaExp.Inc -> {
                 val s = simplifyExpression(expr.source)
-                when {
-                    s is IrOp.JustImm && s.value is JSValue.Number -> IrOp.JustImm(JSValue.Number(s.value.value.toDouble() + 1))
-                    else -> IrOp.UaExp.Inc(s)
-                }
+                foldBigIntUnary(s) { it.add(BigInteger.ONE) }
+                    ?: asNumber(s)?.let { numberExpr(it + 1) }
+                    ?: IrOp.UaExp.Inc(s)
             }
             is IrOp.UaExp.Dec -> {
                 val s = simplifyExpression(expr.source)
-                when {
-                    s is IrOp.JustImm && s.value is JSValue.Number -> IrOp.JustImm(JSValue.Number(s.value.value.toDouble() - 1))
-                    else -> IrOp.UaExp.Dec(s)
-                }
+                foldBigIntUnary(s) { it.subtract(BigInteger.ONE) }
+                    ?: asNumber(s)?.let { numberExpr(it - 1) }
+                    ?: IrOp.UaExp.Dec(s)
+            }
+            is IrOp.UaExp.IsTrue -> {
+                val s = simplifyExpression(expr.source)
+                jsTruthy(s)?.let { boolExpr(it) } ?: IrOp.UaExp.IsTrue(s)
+            }
+            is IrOp.UaExp.IsFalse -> {
+                val s = simplifyExpression(expr.source)
+                jsTruthy(s)?.let { boolExpr(!it) } ?: IrOp.UaExp.IsFalse(s)
+            }
+            is IrOp.UaExp.TypeOf -> {
+                val s = simplifyExpression(expr.source)
+                jsTypeof(s)?.let { stringExpr(it) } ?: IrOp.UaExp.TypeOf(s)
+            }
+            is IrOp.UaExp.ToNumber -> {
+                val s = simplifyExpression(expr.source)
+                jsToNumber(s)?.let { if (it.isNaN()) IrOp.JustImm(JSValue.Nan) else numberExpr(it) }
+                    ?: IrOp.UaExp.ToNumber(s)
+            }
+            is IrOp.UaExp.ToNumeric -> {
+                val s = simplifyExpression(expr.source)
+                jsToNumeric(s) ?: IrOp.UaExp.ToNumeric(s)
             }
             // Other expressions - recursively simplify children
-            is IrOp.BiExp.Eq -> IrOp.BiExp.Eq(simplifyExpression(expr.l), simplifyExpression(expr.r))
-            is IrOp.BiExp.NEq -> IrOp.BiExp.NEq(simplifyExpression(expr.l), simplifyExpression(expr.r))
-            is IrOp.BiExp.Less -> IrOp.BiExp.Less(simplifyExpression(expr.l), simplifyExpression(expr.r))
-            is IrOp.BiExp.LEq -> IrOp.BiExp.LEq(simplifyExpression(expr.l), simplifyExpression(expr.r))
-            is IrOp.BiExp.Ge -> IrOp.BiExp.Ge(simplifyExpression(expr.l), simplifyExpression(expr.r))
-            is IrOp.BiExp.GEq -> IrOp.BiExp.GEq(simplifyExpression(expr.l), simplifyExpression(expr.r))
-            is IrOp.BiExp.StrictEq -> IrOp.BiExp.StrictEq(simplifyExpression(expr.l), simplifyExpression(expr.r))
-            is IrOp.BiExp.StrictNEq -> IrOp.BiExp.StrictNEq(simplifyExpression(expr.l), simplifyExpression(expr.r))
             is IrOp.BiExp.InstOf -> IrOp.BiExp.InstOf(simplifyExpression(expr.l), simplifyExpression(expr.r))
             is IrOp.BiExp.IsIn -> IrOp.BiExp.IsIn(simplifyExpression(expr.l), simplifyExpression(expr.r))
-            is IrOp.UaExp.IsTrue -> IrOp.UaExp.IsTrue(simplifyExpression(expr.source))
-            is IrOp.UaExp.IsFalse -> IrOp.UaExp.IsFalse(simplifyExpression(expr.source))
-            is IrOp.UaExp.TypeOf -> IrOp.UaExp.TypeOf(simplifyExpression(expr.source))
-            is IrOp.UaExp.ToNumber -> IrOp.UaExp.ToNumber(simplifyExpression(expr.source))
-            is IrOp.UaExp.ToNumeric -> IrOp.UaExp.ToNumeric(simplifyExpression(expr.source))
             is IrOp.UaExp.GetTemplateObject -> IrOp.UaExp.GetTemplateObject(simplifyExpression(expr.source))
             else -> expr
         }
     }
-    
-    private fun isZero(expr: IrOp.Expression): Boolean =
-        expr is IrOp.JustImm && expr.value is JSValue.Number && expr.value.value == 0.0
-    
-    private fun isOne(expr: IrOp.Expression): Boolean =
-        expr is IrOp.JustImm && expr.value is JSValue.Number && expr.value.value == 1.0
-    
+
+    // region 常量提取辅助
+
+    private fun asNumber(expr: IrOp.Expression): Double? =
+        (expr as? IrOp.JustImm)?.value?.let { if (it is JSValue.Number) it.value.toDouble() else null }
+
+    private fun asBigInt(expr: IrOp.Expression): BigInteger? =
+        (expr as? IrOp.JustImm)?.value?.let {
+            if (it is JSValue.BigInt) runCatching { BigInteger(it.value) }.getOrNull() else null
+        }
+
+    private fun asString(expr: IrOp.Expression): String? =
+        (expr as? IrOp.JustImm)?.value?.let { if (it is JSValue.Str) it.value else null }
+
+    private fun asBoolean(expr: IrOp.Expression): Boolean? =
+        (expr as? IrOp.JustImm)?.value?.let {
+            when (it) {
+                JSValue.True -> true
+                JSValue.False -> false
+                else -> null
+            }
+        }
+
+    private fun isZero(expr: IrOp.Expression): Boolean = asNumber(expr) == 0.0
+    private fun isOne(expr: IrOp.Expression): Boolean = asNumber(expr) == 1.0
+
     private fun zero(): IrOp.Expression = IrOp.JustImm(JSValue.Number(0))
     private fun one(): IrOp.Expression = IrOp.JustImm(JSValue.Number(1))
+    private fun numberExpr(d: Double): IrOp.Expression = IrOp.JustImm(JSValue.Number(d))
+    private fun boolExpr(b: Boolean): IrOp.Expression =
+        IrOp.JustImm(if (b) JSValue.True else JSValue.False)
+
+    private fun stringExpr(s: String): IrOp.Expression = IrOp.JustImm(JSValue.Str(s))
+
+    // endregion
+
+    // region 二元常量折叠
+
+    private fun foldNumberBinary(
+        l: IrOp.Expression,
+        r: IrOp.Expression,
+        op: (Double, Double) -> Double
+    ): IrOp.Expression? {
+        val ln = asNumber(l)
+        val rn = asNumber(r)
+        return if (ln != null && rn != null) numberExpr(op(ln, rn)) else null
+    }
+
+    private fun foldBitwiseBinary(
+        l: IrOp.Expression,
+        r: IrOp.Expression,
+        op: (Int, Int) -> Int
+    ): IrOp.Expression? {
+        val ln = asNumber(l)?.toInt()
+        val rn = asNumber(r)?.toInt()
+        return if (ln != null && rn != null) {
+            val shift = rn and 0x1f
+            numberExpr(op(ln, shift).toDouble())
+        } else null
+    }
+
+    private fun foldUnsignedShift(
+        l: IrOp.Expression,
+        r: IrOp.Expression
+    ): IrOp.Expression? {
+        val ln = asNumber(l)?.toInt()
+        val rn = asNumber(r)?.toInt()
+        return if (ln != null && rn != null) {
+            val shift = rn and 0x1f
+            numberExpr((ln.toUInt() shr shift).toDouble())
+        } else null
+    }
+
+    private fun foldBigIntBinary(
+        l: IrOp.Expression,
+        r: IrOp.Expression,
+        op: (BigInteger, BigInteger) -> BigInteger?
+    ): IrOp.Expression? {
+        val lb = asBigInt(l)
+        val rb = asBigInt(r)
+        return if (lb != null && rb != null) {
+            op(lb, rb)?.let { IrOp.JustImm(JSValue.BigInt(it.toString())) }
+        } else null
+    }
+
+    private fun foldBigIntExp(
+        l: IrOp.Expression,
+        r: IrOp.Expression
+    ): IrOp.Expression? {
+        val lb = asBigInt(l)
+        val rn = asNumber(r)
+        return if (lb != null && rn != null && rn >= 0 && rn <= Int.MAX_VALUE && rn == rn.toInt().toDouble()) {
+            try {
+                IrOp.JustImm(JSValue.BigInt(lb.pow(rn.toInt()).toString()))
+            } catch (_: Throwable) {
+                null
+            }
+        } else null
+    }
+
+    private fun foldBigIntUnary(
+        expr: IrOp.Expression,
+        op: (BigInteger) -> BigInteger
+    ): IrOp.Expression? {
+        val b = asBigInt(expr) ?: return null
+        return IrOp.JustImm(JSValue.BigInt(op(b).toString()))
+    }
+
+    private fun foldStringConcat(
+        l: IrOp.Expression,
+        r: IrOp.Expression
+    ): IrOp.Expression? {
+        val ls = asString(l)
+        val rs = asString(r)
+        if (ls != null && rs != null) return stringExpr(ls + rs)
+        if (ls != null && r is IrOp.JustImm) return stringExpr(ls + jsValueToString(r.value))
+        if (rs != null && l is IrOp.JustImm) return stringExpr(jsValueToString(l.value) + rs)
+        return null
+    }
+
+    private fun foldStrictEquality(l: IrOp.Expression, r: IrOp.Expression): Boolean? {
+        if (l !is IrOp.JustImm || r !is IrOp.JustImm) return null
+        val lv = l.value
+        val rv = r.value
+        // NaN !== NaN
+        if (lv === JSValue.Nan && rv === JSValue.Nan) return false
+        if (lv::class != rv::class) return false
+        return when {
+            lv is JSValue.Number && rv is JSValue.Number -> lv.value.toDouble() == rv.value.toDouble()
+            lv is JSValue.Str && rv is JSValue.Str -> lv.value == rv.value
+            lv is JSValue.BigInt && rv is JSValue.BigInt -> BigInteger(lv.value) == BigInteger(rv.value)
+            else -> lv === rv
+        }
+    }
+
+    private fun foldAbstractEquality(l: IrOp.Expression, r: IrOp.Expression): Boolean? {
+        if (l !is IrOp.JustImm || r !is IrOp.JustImm) return null
+        val lv = l.value
+        val rv = r.value
+        // 仅对同类型安全求值；跨类型 == 涉及复杂隐式转换，暂不折叠
+        if (lv::class != rv::class) {
+            // null == undefined 在 JS 中为 true
+            if ((lv === JSValue.Null && rv === JSValue.Undefined) ||
+                (lv === JSValue.Undefined && rv === JSValue.Null)
+            ) return true
+            return null
+        }
+        if (lv is JSValue.Number && rv is JSValue.Number) {
+            if (lv.value.toDouble().isNaN() || rv.value.toDouble().isNaN()) return false
+            return lv.value.toDouble() == rv.value.toDouble()
+        }
+        return foldStrictEquality(l, r)
+    }
+
+    private fun foldRelational(
+        l: IrOp.Expression,
+        r: IrOp.Expression,
+        op: (Double, Double) -> Boolean
+    ): IrOp.Expression? {
+        val ln = asNumber(l)
+        val rn = asNumber(r)
+        if (ln != null && rn != null) {
+            if (ln.isNaN() || rn.isNaN()) return boolExpr(false)
+            return boolExpr(op(ln, rn))
+        }
+        val ls = asString(l)
+        val rs = asString(r)
+        return if (ls != null && rs != null) {
+            boolExpr(op(ls.compareTo(rs).toDouble(), 0.0))
+        } else null
+    }
+
+    // endregion
+
+    // region 一元/类型相关常量折叠
+
+    private fun jsTruthy(expr: IrOp.Expression): Boolean? {
+        return when (val v = (expr as? IrOp.JustImm)?.value) {
+            JSValue.False, JSValue.Null, JSValue.Undefined -> false
+            JSValue.True -> true
+            JSValue.Nan -> false
+            JSValue.Infinity -> true
+            is JSValue.Number -> v.value.toDouble() != 0.0
+            is JSValue.BigInt -> BigInteger(v.value) != BigInteger.ZERO
+            is JSValue.Str -> v.value.isNotEmpty()
+            else -> null
+        }
+    }
+
+    private fun jsTypeof(expr: IrOp.Expression): String? {
+        return when (val v = (expr as? IrOp.JustImm)?.value) {
+            JSValue.Undefined -> "undefined"
+            JSValue.Null -> "object"
+            JSValue.True, JSValue.False -> "boolean"
+            is JSValue.Number -> "number"
+            is JSValue.BigInt -> "bigint"
+            is JSValue.Str -> "string"
+            else -> null
+        }
+    }
+
+    private fun jsToNumber(expr: IrOp.Expression): Double? {
+        return when (val v = (expr as? IrOp.JustImm)?.value) {
+            JSValue.Undefined -> Double.NaN
+            JSValue.Null -> 0.0
+            JSValue.True -> 1.0
+            JSValue.False -> 0.0
+            is JSValue.Number -> v.value.toDouble()
+            is JSValue.BigInt -> runCatching { BigInteger(v.value).toDouble() }.getOrNull() ?: Double.NaN
+            is JSValue.Str -> v.value.toDoubleOrNull() ?: Double.NaN
+            else -> null
+        }
+    }
+
+    private fun jsToNumeric(expr: IrOp.Expression): IrOp.Expression? {
+        return when (val v = (expr as? IrOp.JustImm)?.value) {
+            is JSValue.Number -> expr
+            is JSValue.BigInt -> expr
+            JSValue.Undefined -> IrOp.JustImm(JSValue.Nan)
+            JSValue.Null -> zero()
+            JSValue.True -> one()
+            JSValue.False -> zero()
+            is JSValue.Str -> {
+                val d = v.value.toDoubleOrNull() ?: Double.NaN
+                if (d.isNaN()) IrOp.JustImm(JSValue.Nan) else numberExpr(d)
+            }
+            else -> null
+        }
+    }
+
+    private fun jsValueToString(value: JSValue): String = when (value) {
+        JSValue.Undefined -> "undefined"
+        JSValue.Null -> "null"
+        JSValue.True -> "true"
+        JSValue.False -> "false"
+        JSValue.Nan -> "NaN"
+        JSValue.Infinity -> "Infinity"
+        is JSValue.Number -> value.value.toDouble().toString()
+        is JSValue.BigInt -> value.value + "n"
+        is JSValue.Str -> value.value
+        else -> ""
+    }
+
+    // endregion
 }
 
 /**
@@ -215,19 +521,14 @@ object CopyPropagationPass : OptimizationPass {
         for (op in ops) {
             when (op) {
                 is IrOp.AssignReg -> {
-                    // 替换右值中的寄存器引用
+                    // 如果右值直接是已知寄存器，替换为其来源表达式
                     var newRight = op.right
-                    for ((reg, expr) in replacements) {
-                        newRight = newRight.replaceReg(reg, FunSimCtx.RegId.ACC) // 临时替换
-                    }
-                    
-                    // 如果右值是 LoadReg(r) 且 r 在 replacements 中，替换为对应的表达式
                     if (newRight is IrOp.LoadReg && newRight.regId in replacements) {
                         newRight = replacements[newRight.regId]!!
                     }
-                    
+
                     result.add(IrOp.AssignReg(op.left, newRight))
-                    
+
                     // 更新映射
                     if (op.right is IrOp.LoadReg) {
                         replacements[op.left] = replacements[op.right.regId] ?: op.right
@@ -411,8 +712,10 @@ object ExpressionPropagationPass : OptimizationPass {
                     }
                 }
                 is IrOp.AssignObj -> {
-                    // 对象赋值可能影响所有已知表达式，保守地清除
-                    exprMap.clear()
+                    // 对象字段赋值只影响被写入的对象寄存器，不必清空全部映射
+                    for (reg in op.effected()) {
+                        exprMap.remove(reg)
+                    }
                     result.add(op)
                     prevInlinedRight = null
                     prevIndex = -1
@@ -533,6 +836,53 @@ object ExpressionPropagationPass : OptimizationPass {
                 } else {
                     expr
                 }
+            }
+            is IrOp.BiExp -> {
+                val newL = inlineExpression(expr.l, exprMap, depth + 1)
+                val newR = inlineExpression(expr.r, exprMap, depth + 1)
+                if (newL != expr.l || newR != expr.r) {
+                    when (expr) {
+                        is IrOp.BiExp.Add -> IrOp.BiExp.Add(newL, newR)
+                        is IrOp.BiExp.Sub -> IrOp.BiExp.Sub(newL, newR)
+                        is IrOp.BiExp.Mul -> IrOp.BiExp.Mul(newL, newR)
+                        is IrOp.BiExp.Div -> IrOp.BiExp.Div(newL, newR)
+                        is IrOp.BiExp.Mod -> IrOp.BiExp.Mod(newL, newR)
+                        is IrOp.BiExp.Shl -> IrOp.BiExp.Shl(newL, newR)
+                        is IrOp.BiExp.Shr -> IrOp.BiExp.Shr(newL, newR)
+                        is IrOp.BiExp.AShr -> IrOp.BiExp.AShr(newL, newR)
+                        is IrOp.BiExp.And -> IrOp.BiExp.And(newL, newR)
+                        is IrOp.BiExp.Or -> IrOp.BiExp.Or(newL, newR)
+                        is IrOp.BiExp.Xor -> IrOp.BiExp.Xor(newL, newR)
+                        is IrOp.BiExp.Exp -> IrOp.BiExp.Exp(newL, newR)
+                        is IrOp.BiExp.Eq -> IrOp.BiExp.Eq(newL, newR)
+                        is IrOp.BiExp.NEq -> IrOp.BiExp.NEq(newL, newR)
+                        is IrOp.BiExp.Less -> IrOp.BiExp.Less(newL, newR)
+                        is IrOp.BiExp.LEq -> IrOp.BiExp.LEq(newL, newR)
+                        is IrOp.BiExp.Ge -> IrOp.BiExp.Ge(newL, newR)
+                        is IrOp.BiExp.GEq -> IrOp.BiExp.GEq(newL, newR)
+                        is IrOp.BiExp.StrictEq -> IrOp.BiExp.StrictEq(newL, newR)
+                        is IrOp.BiExp.StrictNEq -> IrOp.BiExp.StrictNEq(newL, newR)
+                        is IrOp.BiExp.InstOf -> IrOp.BiExp.InstOf(newL, newR)
+                        is IrOp.BiExp.IsIn -> IrOp.BiExp.IsIn(newL, newR)
+                    }
+                } else expr
+            }
+            is IrOp.UaExp -> {
+                val newS = inlineExpression(expr.source, exprMap, depth + 1)
+                if (newS != expr.source) {
+                    when (expr) {
+                        is IrOp.UaExp.Neg -> IrOp.UaExp.Neg(newS)
+                        is IrOp.UaExp.Not -> IrOp.UaExp.Not(newS)
+                        is IrOp.UaExp.Inc -> IrOp.UaExp.Inc(newS)
+                        is IrOp.UaExp.Dec -> IrOp.UaExp.Dec(newS)
+                        is IrOp.UaExp.IsTrue -> IrOp.UaExp.IsTrue(newS)
+                        is IrOp.UaExp.IsFalse -> IrOp.UaExp.IsFalse(newS)
+                        is IrOp.UaExp.TypeOf -> IrOp.UaExp.TypeOf(newS)
+                        is IrOp.UaExp.ToNumber -> IrOp.UaExp.ToNumber(newS)
+                        is IrOp.UaExp.ToNumeric -> IrOp.UaExp.ToNumeric(newS)
+                        is IrOp.UaExp.GetTemplateObject -> IrOp.UaExp.GetTemplateObject(newS)
+                    }
+                } else expr
             }
             else -> expr
         }

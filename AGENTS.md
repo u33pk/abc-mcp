@@ -229,7 +229,7 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - 需要找到包含 `copyrestargs` / `wide.copyrestargs` 指令的 ABC 文件，确认反编译输出和 rest 签名标注正确
 
 ### 优先级 P2
-3. **增强常量折叠** - 嵌套常量、布尔简化
+3. **增强常量折叠** ✅ - 在 `AlgebraicSimplificationPass` 中实现真正的常量-常量求值：二元数值运算、位运算、比较、`IsTrue`/`IsFalse`、`TypeOf`、`ToNumber`/`ToNumeric`、字符串拼接、`BigInt`；修复 `isZero`/`isOne` 对整数常量的识别；新增 `AlgebraicSimplificationPassTest`
 4. **重复 Load 消除** - 消除冗余的对象字段读取
 5. **交叉引用分析** - 查找方法/字段/类的调用者与实例化位置
    - ✅ 方法调用 xref 已实现：`get_xrefs_to_method` 工具 + `XRefIndex` 索引 + `SessionManager` 缓存
