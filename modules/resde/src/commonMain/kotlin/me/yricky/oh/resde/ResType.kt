@@ -42,7 +42,7 @@ value class ResType(val value:Int) {
         val FLOAT = ResType(18)
         val MEDIA = ResType(19)
         val PROF = ResType(20)
-        val PATTERN = ResType(21)
+        val PATTERN = ResType(22)
         val SYMBOL = ResType(23)
         val RES = ResType(24)
     }

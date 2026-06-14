@@ -240,11 +240,10 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - 已在 `decodeMethodName` 中剥离 `^N` 变体编号后缀
    - 已合并 `StructuredToJs` 与 `ToJs` 中重复的 `decodeMethodName` 实现
    - 输出统一为 `function foo(...)` / `function [ANONYMOUS](...)` / `function constructor(...)` / `function static foo(...)`
-7. **资源索引解析器 `ResIndexBuf` 兼容性**
-   - 当前解析器无法正确解析 RestoolV2 6.1.0.003 格式（Kazumi HAP 的 `resources.index`）
-   - 表现为 `limitKeyConfigs()` 中读取到异常大的 `keyCount`，进而触发 `OutOfMemoryError`
-   - `open_hap` 已增加降级处理避免崩溃，但 `search_resources` / `resolve_resource` 在该格式下仍无法工作
-   - 需要对比新旧 Restool 格式差异，修正 `ResIndexBuf` 的解析偏移和字段布局
+7. **资源索引解析器 `ResIndexBuf` 兼容性** ✅
+   - 已支持旧版 `Restool 4.x` 与新版 `RestoolV2 6.1.0.003` 两种 `resources.index` 格式
+   - 通过检测 `KEYS` 标签位置自动选择解析分支：旧格式在偏移 136 处、新格式在偏移 140 处
+   - `search_resources` / `resolve_resource` / `open_hap` 在 Kazumi HAP 上已可正常工作
 8. **方法内搜索** ✅
    - 新增 `search_in_method` 工具：在指定方法内按正则搜索反汇编文本，返回匹配行及上下文
    - 不触发完整反编译，因此适用于超大方法，不受 100 行展示上限和 10 MB 输出预算限制

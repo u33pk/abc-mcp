@@ -13,5 +13,6 @@ class ResIndexHeader(
 
     companion object{
         const val SIZE = 136
+        const val SIZE_NEW = 140
     }
 }
