@@ -13,7 +13,7 @@ class GetXrefsToClassToolTest {
     private val sessionManager = SessionManager()
     private val registry = ToolRegistry(sessionManager)
 
-    private val kazumiAbc = "/Users/vv/project/unitTest/kazumi/ets/modules.abc"
+    private val kazumiAbc = "/home/orz/project/unitTest/kazumi/ets/modules.abc"
 
     private fun callTool(name: String, vararg pairs: Pair<String, JsonElement>): String {
         val args = buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }

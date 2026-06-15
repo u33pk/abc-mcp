@@ -11,8 +11,8 @@ class SearchInMethodToolTest {
     private val sessionManager = SessionManager()
     private val registry = ToolRegistry(sessionManager)
 
-    private val abcDir = "/Users/vv/project/unitTest/out"
-    private val kazumiAbc = "/Users/vv/project/unitTest/kazumi/ets/modules.abc"
+    private val abcDir = "/home/orz/project/unitTest/out"
+    private val kazumiAbc = "/home/orz/project/unitTest/kazumi/ets/modules.abc"
 
     private fun callTool(name: String, vararg pairs: Pair<String, JsonElement>): String {
         val args = kotlinx.serialization.json.buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }

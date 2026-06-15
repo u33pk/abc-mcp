@@ -16,7 +16,7 @@ import java.nio.channels.FileChannel
 
 class StructuredDecompilerTest {
     
-    private val testAbcDir = "/Users/vv/project/unitTest/out"
+    private val testAbcDir = "/home/orz/project/unitTest/out"
     
     @Test
     fun testAllAbcFiles() {
@@ -357,7 +357,7 @@ class StructuredDecompilerTest {
 
     @Test
     fun scanCopyRestArgs() {
-        val unitTestDir = File("/Users/vv/project/unitTest")
+        val unitTestDir = File("/home/orz/project/unitTest")
         val abcFiles = unitTestDir.walkTopDown().filter { it.isFile && it.extension == "abc" }.toList()
         println("Scanning ${abcFiles.size} ABC files for copyrestargs...")
 
@@ -402,7 +402,7 @@ class StructuredDecompilerTest {
 
     @Test
     fun scanDebugInfoParams() {
-        val unitTestDir = File("/Users/vv/project/unitTest")
+        val unitTestDir = File("/home/orz/project/unitTest")
         val abcFiles = unitTestDir.walkTopDown().filter { it.isFile && it.extension == "abc" }.toList()
         println("Scanning ${abcFiles.size} ABC files for debug parameter names...")
 

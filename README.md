@@ -22,7 +22,7 @@
 | **字符串搜索** | 按正则搜索 ABC 中的字符串常量 |
 | **HAP 包解析** | 解析鸿蒙应用安装包，提取 module.json、ABC 文件、资源、混淆映射等 |
 | **资源索引解析** | 解析 `resources.index`，支持按名称/类型搜索资源 |
-| **MCP 服务** | 通过 stdio JSON-RPC 为 LLM 提供 17 个标准化工具 |
+| **MCP 服务** | 通过 stdio JSON-RPC 为 LLM 提供 18 个标准化工具 |
 
 ## 技术栈
 
@@ -93,7 +93,7 @@ fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutin
 }
 ```
 
-## 可用工具（17 个）
+## 可用工具（18 个）
 
 ### ABC 字节码工具
 
@@ -110,6 +110,7 @@ fat jar 会包含 `abcde`、`resde`、`hapde`、kotlinx-serialization、coroutin
 | `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
 | `get_xrefs_to_field` | 查找字段的读取者和写入者（交叉引用） |
 | `get_xrefs_to_class` | 查找类的实例化位置（交叉引用） |
+| `get_class_hierarchy` | 查询类的父类、接口、子类与接口实现者 |
 | `search_in_method` | 在方法体内按正则搜索反汇编文本，返回匹配行及上下文 |
 
 ### HAP 包工具

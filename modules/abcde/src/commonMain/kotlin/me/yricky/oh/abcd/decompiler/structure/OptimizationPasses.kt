@@ -644,6 +644,161 @@ object ReturnOptimizationPass : OptimizationPass {
 }
 
 /**
+ * 重复 Load 消除 Pass
+ * 当同一对象的同一字段被连续读取且中间无写入时，将后续读取替换为对首次结果寄存器的引用
+ */
+object RedundantLoadEliminationPass : OptimizationPass {
+
+    private sealed interface FieldKey {
+        data class Name(val name: String) : FieldKey
+        data class Index(val index: Int) : FieldKey
+    }
+
+    private data class CacheKey(val objReg: FunSimCtx.RegId, val field: FieldKey)
+
+    override fun run(ops: List<IrOp>): List<IrOp> {
+        val cache = mutableMapOf<CacheKey, FunSimCtx.RegId>()
+        val result = mutableListOf<IrOp>()
+
+        for (op in ops) {
+            when (op) {
+                is IrOp.AssignReg -> {
+                    // 1. 尝试消除冗余字段读取
+                    val newRight = eliminateRedundantLoad(op.right, cache)
+                    result.add(IrOp.AssignReg(op.left, newRight))
+
+                    // 2. 如果是首次出现的 ObjField.Name/Index(LoadReg, ...)，注册到缓存
+                    if (newRight === op.right) {
+                        registerLoad(op.right, op.left, cache)
+                    }
+
+                    // 3. left 寄存器被赋值，其作为 obj 的缓存项失效
+                    cache.keys.removeAll { it.objReg == op.left }
+
+                    // 4. 调用可能修改参数对象的属性
+                    invalidateForSideEffects(op.right, cache)
+                }
+                is IrOp.AssignObj -> {
+                    result.add(op)
+                    invalidateForAssignObj(op, cache)
+                }
+                is IrOp.DeleteProp -> {
+                    result.add(op)
+                    for (reg in op.read()) {
+                        cache.keys.removeAll { it.objReg == reg }
+                    }
+                }
+                is IrOp.DefineGetterSetter -> {
+                    result.add(op)
+                    cache.keys.removeAll { it.objReg == op.obj }
+                }
+                else -> result.add(op)
+            }
+        }
+        return result
+    }
+
+    private fun eliminateRedundantLoad(
+        expr: IrOp.Expression,
+        cache: Map<CacheKey, FunSimCtx.RegId>
+    ): IrOp.Expression {
+        return when (expr) {
+            is IrOp.ObjField.Name -> {
+                val obj = expr.obj
+                if (obj is IrOp.LoadReg) {
+                    val key = CacheKey(obj.regId, FieldKey.Name(expr.name))
+                    cache[key]?.let { IrOp.LoadReg(it) } ?: expr
+                } else expr
+            }
+            is IrOp.ObjField.Index -> {
+                val obj = expr.obj
+                if (obj is IrOp.LoadReg) {
+                    val key = CacheKey(obj.regId, FieldKey.Index(expr.index))
+                    cache[key]?.let { IrOp.LoadReg(it) } ?: expr
+                } else expr
+            }
+            else -> expr
+        }
+    }
+
+    private fun registerLoad(
+        expr: IrOp.Expression,
+        resultReg: FunSimCtx.RegId,
+        cache: MutableMap<CacheKey, FunSimCtx.RegId>
+    ) {
+        when (expr) {
+            is IrOp.ObjField.Name -> {
+                val obj = expr.obj
+                if (obj is IrOp.LoadReg) {
+                    cache[CacheKey(obj.regId, FieldKey.Name(expr.name))] = resultReg
+                }
+            }
+            is IrOp.ObjField.Index -> {
+                val obj = expr.obj
+                if (obj is IrOp.LoadReg) {
+                    cache[CacheKey(obj.regId, FieldKey.Index(expr.index))] = resultReg
+                }
+            }
+            // ObjField.Value — 动态 key，不缓存
+            else -> {}
+        }
+    }
+
+    private fun invalidateForAssignObj(
+        op: IrOp.AssignObj,
+        cache: MutableMap<CacheKey, FunSimCtx.RegId>
+    ) {
+        val objRegs = op.left.obj.read().toSet()
+        when (op.left) {
+            is IrOp.ObjField.Name -> {
+                // 直接命名字段写入 — 仅失效该字段
+                for (reg in objRegs) {
+                    cache.remove(CacheKey(reg, FieldKey.Name((op.left as IrOp.ObjField.Name).name)))
+                }
+            }
+            else -> {
+                // Index/Value 写入 — 可能指向任意字段，失效 obj 的所有缓存
+                for (reg in objRegs) {
+                    cache.keys.removeAll { it.objReg == reg }
+                }
+            }
+        }
+    }
+
+    private fun invalidateForSideEffects(
+        expr: IrOp.Expression,
+        cache: MutableMap<CacheKey, FunSimCtx.RegId>
+    ) {
+        val affectedRegs = mutableSetOf<FunSimCtx.RegId>()
+        when (expr) {
+            is IrOp.CallAcc -> {
+                affectedRegs.addAll(expr.args)
+                expr.overrideThis?.let { affectedRegs.add(it) }
+            }
+            is IrOp.CallWithTarget -> {
+                affectedRegs.addAll(expr.args)
+                expr.overrideThis?.let { affectedRegs.add(it) }
+                affectedRegs.addAll(expr.target.read().toSet())
+            }
+            is IrOp.NewInst -> {
+                affectedRegs.addAll(expr.constructorArgs)
+                affectedRegs.add(expr.clazz)
+            }
+            is IrOp.NewClass -> {
+                affectedRegs.add(expr.parent)
+            }
+            is IrOp.DynamicImport -> {
+                affectedRegs.add(expr.regId)
+            }
+            else -> {} // 纯表达式 — 无副作用
+        }
+        for (reg in affectedRegs) {
+            cache.keys.removeAll { it.objReg == reg }
+        }
+    }
+}
+
+/**
  * 表达式传播 Pass
  * 将 _acc_ = obj.method; _acc_ = this._acc_() 合并为 _acc_ = obj.method()
  * 以及更通用的表达式内联
@@ -893,13 +1048,16 @@ object ExpressionPropagationPass : OptimizationPass {
      */
     private fun resolveReg(
         reg: FunSimCtx.RegId,
-        exprMap: Map<FunSimCtx.RegId, IrOp.Expression>
+        exprMap: Map<FunSimCtx.RegId, IrOp.Expression>,
+        visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()
     ): FunSimCtx.RegId {
+        if (reg in visited) return reg  // 循环检测
+        visited.add(reg)
         val mapped = exprMap[reg]
         if (mapped != null && expressionComplexity(mapped) <= MAX_INLINE_COMPLEXITY) {
             // 如果映射的表达式是 LoadReg，返回其 regId
             if (mapped is IrOp.LoadReg) {
-                return resolveReg(mapped.regId, exprMap)
+                return resolveReg(mapped.regId, exprMap, visited)
             }
         }
         return reg

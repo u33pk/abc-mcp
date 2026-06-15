@@ -20,7 +20,7 @@ class ResIndexBufTest {
 
     @Test
     fun getHeader() {
-        val res = openResIndex("/Users/vv/project/unitTest/kazumi/test_resources.index")
+        val res = openResIndex("/home/orz/project/unitTest/kazumi/test_resources.index")
             ?: return Assume.assumeTrue("test_resources.index not found", false).let { }
         println(String(res.header.version))
         println("size:${res.header.fileSize}")
@@ -29,7 +29,7 @@ class ResIndexBufTest {
 
     @Test
     fun testOldFormatResMap() {
-        val res = openResIndex("/Users/vv/project/unitTest/kazumi/test_resources.index")
+        val res = openResIndex("/home/orz/project/unitTest/kazumi/test_resources.index")
             ?: return Assume.assumeTrue("test_resources.index not found", false).let { }
         assertFalse("旧格式 resources.index 不应为空", res.resMap.isEmpty())
         assertTrue("应包含 app_name 资源", res.resMap.values.flatten().any { it.fileName == "app_name" })
@@ -40,7 +40,7 @@ class ResIndexBufTest {
 
     @Test
     fun testNewFormatResMap() {
-        val res = openResIndex("/Users/vv/project/unitTest/kazumi/resources.index")
+        val res = openResIndex("/home/orz/project/unitTest/kazumi/resources.index")
             ?: return Assume.assumeTrue("resources.index not found", false).let { }
         assertFalse("新格式 resources.index 不应为空", res.resMap.isEmpty())
         val allItems = res.resMap.values.flatten()

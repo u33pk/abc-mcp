@@ -16,7 +16,7 @@ import java.nio.channels.FileChannel
 
 class KazumiAbcTest {
 
-    private val abcFile = File("/Users/vv/project/unitTest/kazumi/ets/modules.abc")
+    private val abcFile = File("/home/orz/project/unitTest/kazumi/ets/modules.abc")
 
     @Test
     fun testKazumiAbc() {

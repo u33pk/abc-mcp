@@ -10,9 +10,9 @@ class McpToolsTest {
     private val sessionManager = SessionManager()
     private val registry = ToolRegistry(sessionManager)
 
-    private val abcDir = "/Users/vv/project/unitTest/out"
-    private val hapFile = "/Users/vv/project/unitTest/kazumi/Kazumi_ohos_2.1.5_unsigned.hap"
-    private val resIndexFile = "/Users/vv/project/unitTest/kazumi/test_resources.index"
+    private val abcDir = "/home/orz/project/unitTest/out"
+    private val hapFile = "/home/orz/project/unitTest/kazumi/Kazumi_ohos_2.1.5_unsigned.hap"
+    private val resIndexFile = "/home/orz/project/unitTest/kazumi/test_resources.index"
 
     private fun callTool(name: String, vararg pairs: Pair<String, JsonElement>): String {
         val args = buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }

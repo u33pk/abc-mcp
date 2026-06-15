@@ -71,6 +71,7 @@ class StructuredToJs(val asm: Asm) {
 
     private val imports = mutableListOf<ModuleLiteralArray.RegularImport>()
     private val nsImports = mutableListOf<ModuleLiteralArray.NamespaceImport>()
+    private val exports = mutableSetOf<ModuleLiteralArray.LocalExport>()
     private var outputSize = 0
 
     /**
@@ -110,10 +111,23 @@ class StructuredToJs(val asm: Asm) {
             sb.safeAppend("}")
 
             // 添加导入语句
-            val importStr = imports.joinToString(separator = ";\n") { it.toString() }
+            val importStr = imports.distinctBy { it.localName }.joinToString(separator = ";\n") { it.toString() }
             val nsImportStr = nsImports.joinToString(separator = ";\n") { it.toString() }
 
-            "$importStr\n$nsImportStr\n\n$sb".trim()
+            // 添加导出语句
+            val exportStr = exports.mapNotNull { exp ->
+                val local = exp.localName ?: return@mapNotNull null
+                val export = exp.exportName ?: return@mapNotNull null
+                if (local == export) "export { $local }" else "export { $local as $export }"
+            }.distinct().joinToString(separator = ";\n")
+
+            val header = listOfNotNull(
+                importStr.ifBlank { null },
+                nsImportStr.ifBlank { null },
+                exportStr.ifBlank { null }
+            ).joinToString(separator = ";\n")
+
+            if (header.isNotBlank()) "$header;\n\n$sb" else sb.toString()
         } catch (e: OutputTooLargeException) {
             // 把当前已生成的部分输出附加到异常中，供上层拼接摘要后返回给 LLM
             throw OutputTooLargeException(e.generatedChars, sb.toString())
@@ -214,6 +228,7 @@ class StructuredToJs(val asm: Asm) {
                 val optimizedOps = IrOpOptimizer.optimizeList(ops, liveOut)
 
                 for (irOp in optimizedOps) {
+                    if (irOp is IrOp.NOP || irOp is IrOp.JustAnno) continue
                     out.safeAppend("$indentStr${generateIrOp(irOp)}\n")
                 }
             }
@@ -237,7 +252,7 @@ class StructuredToJs(val asm: Asm) {
             IrOp.Debugger -> "/* debugger */"
             IrOp.Deprecated -> "/* deprecated */"
             IrOp.Disabled -> "/* disabled */"
-            IrOp.NOP -> "/* nop */"
+            IrOp.NOP -> ""
             is IrOp.NewLex -> "/* newLex(${op.size}) */"
             is IrOp.UnImplemented -> "/* unimplemented: ${op.item.asmName} */"
             is IrOp.JustAnno -> "/* ${op.anno} */"
@@ -252,6 +267,11 @@ class StructuredToJs(val asm: Asm) {
                     is IrOp.Throw.Error -> "throw Error(${op.msg});"
                     is IrOp.DeleteProp -> "delete ${generateRegId(op.obj)}[${generateRegId(op.prop)}];"
                     is IrOp.DefineGetterSetter -> "Object.defineProperty(${generateRegId(op.obj)}, ${generateRegId(op.prop)}, {get: ${generateRegId(op.getter)}, set: ${generateRegId(op.setter)}});"
+                    is IrOp.AssignModuleVar -> {
+                        val name = op.local.localName ?: "moduleSlot"
+                        exports.add(op.local)
+                        "$name = ${generateExpression(op.right)};"
+                    }
                 }
             }
         }
@@ -289,6 +309,7 @@ class StructuredToJs(val asm: Asm) {
             is IrOp.DynamicImport -> "import(${generateRegId(exp.regId)})"
             is IrOp.JustImm -> generateJsValue(exp.value)
             is IrOp.LoadExternalModule -> "${exp.ext.also { imports.add(it) }.localName}"
+            is IrOp.LoadLocalModuleVar -> "${exp.local.also { exports.add(it) }.localName ?: "moduleSlot"}"
             is IrOp.LoadReg -> generateRegId(exp.regId)
             is IrOp.NewClass -> "/* newClass */"
             is IrOp.NewInst -> "new ${generateRegId(exp.clazz)}(${exp.constructorArgs.joinToString { generateRegId(it) }})"

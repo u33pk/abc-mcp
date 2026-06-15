@@ -13,7 +13,7 @@ import java.nio.ByteOrder
 import java.nio.channels.FileChannel
 
 class HapFileInfoTest{
-    val file = File("/Users/vv/project/unitTest/kazumi/Kazumi_ohos_2.1.5_unsigned.hap")
+    val file = File("/home/orz/project/unitTest/kazumi/Kazumi_ohos_2.1.5_unsigned.hap")
     val mmap by lazy {
         Assume.assumeTrue("Test HAP file not found: $file", file.exists())
         FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())

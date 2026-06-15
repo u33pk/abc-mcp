@@ -56,10 +56,19 @@ class OpenHapTool : Tool {
                 sb.appendLine("Devices: ${config.module.deviceTypes}")
             }
 
-            // List ABC files
+            // List and extract ABC files
             val abcFiles = entries.filter { it.name.endsWith(".abc") }
+            val extractDir = File(file.parentFile, file.nameWithoutExtension + "_abc")
             sb.appendLine("\n--- ABC Files (${abcFiles.size}) ---")
-            abcFiles.forEach { sb.appendLine("  ${it.name} (${it.size} bytes)") }
+            abcFiles.forEach { entry ->
+                val targetFile = File(extractDir, entry.name)
+                if (!targetFile.exists()) {
+                    targetFile.parentFile.mkdirs()
+                    zip.getInputStream(entry).use { it.copyTo(targetFile.outputStream()) }
+                }
+                sb.appendLine("  ${entry.name} (${entry.size} bytes)")
+                sb.appendLine("    -> ${targetFile.absolutePath}")
+            }
 
             // List resources
             val resIndex = entries.find { it.name == "resources.index" }

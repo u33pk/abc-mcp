@@ -43,7 +43,38 @@ class GetClassDetailTool(private val sessionManager: SessionManager) : Tool {
             classItem.fields.forEach { field ->
                 sb.appendLine("  ${field.name}: ${field.type}")
             }
-            sb.appendLine("Methods: ${classItem.methods.size}")
+
+            // 模块 import/export 元数据
+            val mi = classItem.moduleInfo
+            if (mi != null) {
+                val ri = mi.regularImports
+                val ni = mi.namespaceImports
+                val le = mi.localExports
+                if (ri.isNotEmpty() || ni.isNotEmpty()) {
+                    sb.appendLine("\nImports (${ri.size + ni.size}):")
+                    ri.forEach { imp ->
+                        val local = imp.localName ?: "?"
+                        val from = imp.moduleRequest?.str ?: "?"
+                        sb.appendLine("  import { $local } from \"$from\"")
+                    }
+                    ni.forEach { ns ->
+                        val local = ns.localName ?: "?"
+                        val from = ns.moduleRequest?.str ?: "?"
+                        sb.appendLine("  import * as $local from \"$from\"")
+                    }
+                }
+                if (le.isNotEmpty()) {
+                    sb.appendLine("\nExports (${le.size}):")
+                    le.forEach { exp ->
+                        val local = exp.localName ?: "?"
+                        val export = exp.exportName ?: "?"
+                        if (local == export) sb.appendLine("  export { $local }")
+                        else sb.appendLine("  export { $local as $export }")
+                    }
+                }
+            }
+
+            sb.appendLine("\nMethods: ${classItem.methods.size}")
             classItem.methods.forEach { method ->
                 val methodName = if (method is me.yricky.oh.abcd.cfm.AbcMethod) {
                     decodeMethodName(method)

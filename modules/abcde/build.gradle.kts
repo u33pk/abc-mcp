@@ -29,7 +29,7 @@ repositories {
 
 kotlin {
     jvm()
-    jvmToolchain(26)
+    jvmToolchain(21)
 
 
     sourceSets {
@@ -102,7 +102,7 @@ kotlin {
 
 tasks.withType<Test> {
     jvmArgs("-Xmx8192m")
-    environment("abcPath", "/Users/vv/project/unitTest/kazumi/ets/modules.abc")
+    environment("abcPath", "/home/orz/project/unitTest/out/complex_test.abc")
 }
 
 fun KotlinSourceSet.prepareIsaResource():File{

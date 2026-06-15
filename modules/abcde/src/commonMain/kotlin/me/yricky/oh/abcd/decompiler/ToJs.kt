@@ -35,7 +35,7 @@ class ToJs(val asm: Asm) {
             IrOp.Debugger -> "/* debugger */"
             IrOp.Deprecated -> "/* deprecated */"
             IrOp.Disabled -> "/* disabled */"
-            IrOp.NOP -> "/* nop */"
+            IrOp.NOP -> ""
             is IrOp.NewLex -> "/* newLex(${op.size}) */"
             is IrOp.UnImplemented -> throw UnImplementedError(op.item)
             is IrOp.JustAnno -> "/* ${op.anno} */"
@@ -50,6 +50,7 @@ class ToJs(val asm: Asm) {
                     is IrOp.Throw.Error -> "throw Error(${op.msg});"
                     is IrOp.DeleteProp -> "delete ${toJS(op.obj)}[${toJS(op.prop)}];"
                     is IrOp.DefineGetterSetter -> "Object.defineProperty(${toJS(op.obj)}, ${toJS(op.prop)}, {get: ${toJS(op.getter)}, set: ${toJS(op.setter)}});"
+                    is IrOp.AssignModuleVar -> "${op.local.localName ?: "moduleSlot"} = ${toJS(op.right)};"
                 }
             }
 
@@ -85,6 +86,7 @@ class ToJs(val asm: Asm) {
             is IrOp.DynamicImport -> "import(${toJS(exp.regId)})"
             is IrOp.JustImm -> toJS(exp.value)
             is IrOp.LoadExternalModule -> "${exp.ext.also { imports.add(it) }.localName}"
+            is IrOp.LoadLocalModuleVar -> "${exp.local.localName ?: "moduleSlot"}"
             is IrOp.LoadReg -> toJS(exp.regId)
             is IrOp.NewClass -> TODO("解析NewClass操作尚未实现")
             is IrOp.NewInst -> "new ${toJS(exp.clazz)}(${exp.constructorArgs.joinToString { toJS(it) }})"

@@ -12,8 +12,8 @@ class ResourceCompatSmokeTest {
     private val sessionManager = SessionManager()
     private val registry = ToolRegistry(sessionManager)
 
-    private val newResIndex = "/Users/vv/project/unitTest/kazumi/resources.index"
-    private val hapFile = "/Users/vv/project/unitTest/kazumi/Kazumi_ohos_2.1.5_unsigned.hap"
+    private val newResIndex = "/home/orz/project/unitTest/kazumi/resources.index"
+    private val hapFile = "/home/orz/project/unitTest/kazumi/Kazumi_ohos_2.1.5_unsigned.hap"
 
     private fun callTool(name: String, vararg pairs: Pair<String, JsonElement>): String {
         val args = buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }

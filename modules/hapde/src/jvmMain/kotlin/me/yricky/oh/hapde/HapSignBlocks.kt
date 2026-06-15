@@ -32,6 +32,7 @@ class HapSignBlocks(
         ):HapSignBlocks?{
             val info = HapFileInfo.from(hap) ?: return null
             val hapSigningBlockHeaderOffset = info.centralDirectoryOffset - HEADER_SIZE
+            if (hapSigningBlockHeaderOffset < 0 || hapSigningBlockHeaderOffset > Int.MAX_VALUE) return null
             val header = hap.slice(hapSigningBlockHeaderOffset.toInt(), HEADER_SIZE)
 
             val blockCount = header.getInt(0)
@@ -47,6 +48,8 @@ class HapSignBlocks(
             }
 
             val sigBlockOffset = info.centralDirectoryOffset - sigBlockSize
+            if (sigBlockOffset < 0 || sigBlockOffset > Int.MAX_VALUE) return null
+            if (sigBlockSize < 0 || sigBlockSize > Int.MAX_VALUE) return null
             val content = hap.slice(sigBlockOffset.toInt(), sigBlockSize.toInt())
 
             val blocks = (0 until blockCount).map { idx ->

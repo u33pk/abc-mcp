@@ -18,11 +18,12 @@ object IrOpOptimizer {
      * 按顺序执行，迭代直到不动点
      */
     private val passes = listOf(
-        ExpressionPropagationPass,    // 表达式传播（最先执行）
-        AlgebraicSimplificationPass,  // 代数化简
-        CopyPropagationPass,          // 拷贝传播
-        DeadCodeEliminationPass,      // 死代码消除
-        AccCopyPropagationPass        // ACC 拷贝传播（保留原有逻辑）
+        ExpressionPropagationPass,        // 表达式传播（最先：内联 + 合并函数调用）
+        AlgebraicSimplificationPass,      // 代数化简
+        CopyPropagationPass,              // 拷贝传播
+        RedundantLoadEliminationPass,     // 重复 Load 消除（CopyProp 之后）
+        DeadCodeEliminationPass,          // 死代码消除
+        AccCopyPropagationPass            // ACC 拷贝传播（保留原有逻辑）
     )
     
     /**

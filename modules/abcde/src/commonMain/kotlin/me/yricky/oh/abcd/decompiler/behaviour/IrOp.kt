@@ -27,7 +27,47 @@ sealed interface IrOp {
                     0xfd.toByte() -> when(opCode){
                         0x0a.toByte() -> AssignObj(ObjField.Index(regId(item.opUnits[2]), item.opUnits[3].toUnsignedInt()), LoadReg.acc)
                         0x0b.toByte() -> CopyRestArgs((item.opUnits[2] as Short).toUShort().toInt()).st2Acc()
+                        0x0f.toByte() -> {
+                            val local = item.asm.code.method.clazz!!.moduleInfo!!.localExports[item.opUnits[2].toUnsignedInt()]
+                            AssignModuleVar(local, LoadReg.acc)
+                        }
+                        0x10.toByte() -> {
+                            val local = item.asm.code.method.clazz!!.moduleInfo!!.localExports[item.opUnits[2].toUnsignedInt()]
+                            LoadLocalModuleVar(local).st2Acc()
+                        }
                         0x11.toByte() -> LoadExternalModule(item.asm.code.method.clazz!!.moduleInfo!!.regularImports[item.opUnits[2].toUnsignedInt()]).st2Acc()
+
+                        // wide.callrange: imm16 高字节=arg count, 低字节=start reg
+                        0x04.toByte() -> {
+                            val imm = item.opUnits[2].toUnsignedInt()
+                            val argCount = imm shr 8
+                            val firstArg = imm and 0xFF
+                            CallAcc((0 until argCount).map { regId(firstArg + it) }).st2Acc()
+                        }
+                        // wide.callthisrange: imm16 高字节=this reg, 低字节=arg count; v=first arg reg
+                        0x05.toByte() -> {
+                            val imm = item.opUnits[2].toUnsignedInt()
+                            val thisReg = imm shr 8
+                            val argCount = imm and 0xFF
+                            val firstArg = item.opUnits[3].toUnsignedInt()
+                            CallAcc((0 until argCount).map { regId(firstArg + it) }, regId(thisReg)).st2Acc()
+                        }
+                        // wide.supercallthisrange: 同 wide.callthisrange
+                        0x06.toByte() -> {
+                            val imm = item.opUnits[2].toUnsignedInt()
+                            val thisReg = imm shr 8
+                            val argCount = imm and 0xFF
+                            val firstArg = item.opUnits[3].toUnsignedInt()
+                            CallAcc((0 until argCount).map { regId(firstArg + it) }, regId(thisReg)).st2Acc()
+                        }
+                        // wide.supercallarrowrange: 同 wide.callthisrange
+                        0x07.toByte() -> {
+                            val imm = item.opUnits[2].toUnsignedInt()
+                            val thisReg = imm shr 8
+                            val argCount = imm and 0xFF
+                            val firstArg = item.opUnits[3].toUnsignedInt()
+                            CallAcc((0 until argCount).map { regId(firstArg + it) }, regId(thisReg)).st2Acc()
+                        }
                         else -> UnImplemented(item)
                     }
                     0xfe.toByte() -> when(opCode){
@@ -111,10 +151,30 @@ sealed interface IrOp {
                     regId(item.opUnits[5].toUnsignedInt())
                 ), regId(item.opUnits[2])).st2Acc()
 
+                // callthisrange: this.method(arg0, arg1, ...)
+                //   opUnits[1] = this reg, opUnits[2] = arg count, opUnits[3] = first arg reg
+                0x31.toByte() -> {
+                    val thisReg = item.opUnits[1].toUnsignedInt()
+                    val argCount = item.opUnits[2].toUnsignedInt()
+                    val firstArg = item.opUnits[3].toUnsignedInt()
+                    CallAcc((0 until argCount).map { regId(firstArg + it) }, regId(thisReg)).st2Acc()
+                }
+                // supercallthisrange: super(arg0, arg1, ...)
+                //   opUnits[1] = this reg, opUnits[2] = arg count, opUnits[3] = first arg reg
+                0x32.toByte() -> {
+                    val thisReg = item.opUnits[1].toUnsignedInt()
+                    val argCount = item.opUnits[2].toUnsignedInt()
+                    val firstArg = item.opUnits[3].toUnsignedInt()
+                    CallAcc((0 until argCount).map { regId(firstArg + it) }, regId(thisReg)).st2Acc()
+                }
+
                 0x33.toByte() -> JSValue.Function(
                     (item.ins.format[2] as InstFmt.MId).getMethod(item),
                     item.opUnits[3].toUnsignedInt()
                 ).just().st2Acc()
+
+                // definemethod: 注册方法到类，ACC 透传（acc=inout:top）
+                0x34.toByte() -> NOP
 
                 0x35.toByte() -> NewClass(
                     JSValue.Function((item.ins.format[2] as InstFmt.MId).getMethod(item), item.opUnits[4].toUnsignedInt()),
@@ -169,6 +229,14 @@ sealed interface IrOp {
                 0x6f.toByte() -> LoadReg(FunSimCtx.RegId.THIS).st2Acc()
                 0x70.toByte() -> JSValue.Hole.just().st2Acc()
 
+                // callrange: func(arg0, arg1, ...) — 无 this 绑定
+                //   opUnits[1] = IC slot, opUnits[2] = arg count, opUnits[3] = first arg reg
+                0x73.toByte() -> {
+                    val argCount = item.opUnits[2].toUnsignedInt()
+                    val firstArg = item.opUnits[3].toUnsignedInt()
+                    CallAcc((0 until argCount).map { regId(firstArg + it) }).st2Acc()
+                }
+
                 0x74.toByte() -> JSValue.Function(
                     (item.ins.format[2] as InstFmt.MId).getMethod(item),
                     item.opUnits[3].toUnsignedInt()
@@ -188,6 +256,14 @@ sealed interface IrOp {
                 )
                 0x7b.toByte() -> GetModuleNamespace(item.asm.code.method.clazz!!.moduleInfo!!.moduleRequests[item.opUnits[1].toUnsignedInt()]).st2Acc()
 
+                0x7c.toByte() -> {
+                    val local = item.asm.code.method.clazz!!.moduleInfo!!.localExports[item.opUnits[1].toUnsignedInt()]
+                    AssignModuleVar(local, LoadReg.acc)
+                }
+                0x7d.toByte() -> {
+                    val local = item.asm.code.method.clazz!!.moduleInfo!!.localExports[item.opUnits[1].toUnsignedInt()]
+                    LoadLocalModuleVar(local).st2Acc()
+                }
                 0x7e.toByte() -> LoadExternalModule(item.asm.code.method.clazz!!.moduleInfo!!.regularImports[item.opUnits[1].toUnsignedInt()]).st2Acc()
 
                 0x7f.toByte() -> AssignObj(ObjField.Name(FunSimCtx.RegId.GLOBAL, (item.ins.format[2] as InstFmt.SId).getString(item)), LoadReg.acc) // stglobalvar
@@ -225,6 +301,18 @@ sealed interface IrOp {
                 0xad.toByte() -> JSValue.Symbol.SymbolObj.just().st2Acc()
 
                 0xb0.toByte() -> Debugger
+
+                // supercallarrowrange: arrow 函数的 super 调用
+                //   opUnits[1] = this reg, opUnits[2] = arg count, opUnits[3] = first arg reg
+                0xbb.toByte() -> {
+                    val thisReg = item.opUnits[1].toUnsignedInt()
+                    val argCount = item.opUnits[2].toUnsignedInt()
+                    val firstArg = item.opUnits[3].toUnsignedInt()
+                    CallAcc((0 until argCount).map { regId(firstArg + it) }, regId(thisReg)).st2Acc()
+                }
+
+                // definemethod (16-bit imm1): ACC 透传
+                0xbe.toByte() -> NOP
 
                 0xbd.toByte() -> DynamicImport().st2Acc()
 
@@ -377,6 +465,26 @@ sealed interface IrOp {
     }
     class LoadExternalModule(val ext: ModuleLiteralArray.RegularImport): NoRegExpression
     class GetModuleNamespace(val ns: OhmUrl) : NoRegExpression
+
+    /**
+     * 加载本地模块变量（ldlocalmodulevar）
+     * 从当前模块的 localExports 槽位读取值
+     */
+    class LoadLocalModuleVar(val local: ModuleLiteralArray.LocalExport) : NoRegExpression
+
+    /**
+     * 存储模块变量（stmodulevar）
+     * 将值写入当前模块的 localExports 槽位
+     */
+    class AssignModuleVar(
+        val local: ModuleLiteralArray.LocalExport,
+        override val right: Expression
+    ): Assign {
+        override fun read(): Sequence<FunSimCtx.RegId> = right.read()
+        override fun effected(): Sequence<FunSimCtx.RegId> = right.effected()
+        override val leftReg: FunSimCtx.RegId? get() = null
+        override fun replaceRight(newValue: Expression): Assign = AssignModuleVar(local, newValue)
+    }
 
     /**
      * 收集剩余参数（rest parameters）
