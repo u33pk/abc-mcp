@@ -2,13 +2,15 @@ package me.yricky.oh.mcp.tools
 
 import kotlinx.serialization.json.*
 import me.yricky.oh.mcp.session.SessionManager
+import org.junit.Assume
 import org.junit.Test
+import java.io.File
 
 class HishOutputDemoTest {
 
     private val sessionManager = SessionManager()
     private val registry = ToolRegistry(sessionManager)
-    private val hapFile = "/home/orz/project/unitTest/HISH/hish-unsigned.hap"
+    private val hapFile = "/Users/vv/project/unitTest/HISH/hish-unsigned.hap"
 
     private fun callTool(name: String, vararg pairs: Pair<String, JsonElement>): String {
         val args = buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }
@@ -28,6 +30,7 @@ class HishOutputDemoTest {
 
     @Test
     fun demoOutput() {
+        Assume.assumeTrue("HISH HAP not found: $hapFile", File(hapFile).exists())
         val abc = getAbcPath()
 
         println("=" .repeat(70))

@@ -2,8 +2,11 @@ package me.yricky.oh.mcp.tools
 
 import kotlinx.serialization.json.*
 import me.yricky.oh.mcp.session.SessionManager
+import org.junit.Assume
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
+import java.io.File
 
 /**
  * 使用 HISH HAP 进行全工具集成测试
@@ -13,7 +16,12 @@ class HishHapIntegrationTest {
     private val sessionManager = SessionManager()
     private val registry = ToolRegistry(sessionManager)
 
-    private val hapFile = "/home/orz/project/unitTest/HISH/hish-unsigned.hap"
+    private val hapFile = "/Users/vv/project/unitTest/HISH/hish-unsigned.hap"
+
+    @Before
+    fun setUp() {
+        Assume.assumeTrue("HISH HAP not found: $hapFile", File(hapFile).exists())
+    }
 
     private fun callTool(name: String, vararg pairs: Pair<String, JsonElement>): String {
         val args = buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }

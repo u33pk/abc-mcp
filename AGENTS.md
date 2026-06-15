@@ -224,10 +224,13 @@ _acc_ = AtkTsGlobal.print(_acc_);
 ## 待完成任务
 
 ### 优先级 P1
-1. **验证参数名还原效果**
-   - 需要找到携带 `DebugInfo.params` 的 ABC/HAP 文件，确认 `arg0` → 真实参数名的还原正确
-2. **验证 copyrestargs 效果**
-   - 需要找到包含 `copyrestargs` / `wide.copyrestargs` 指令的 ABC 文件，确认反编译输出和 rest 签名标注正确
+1. **验证参数名还原效果** 🔄
+   - 已实现 `HapP1ValidationTest` 对 `/Users/vv/project/unitTest/hap` 下全部 HAP 进行扫描
+   - 扫描 33239 个方法，当前样本中 `DebugInfo.params` 均为空（发行版 HAP 通常已剥离调试参数名）
+   - 仍需找到携带 `DebugInfo.params` 的 ABC/HAP，确认 `arg0` → 真实参数名的还原正确
+2. **验证 copyrestargs 效果** ✅
+   - 在 `/Users/vv/project/unitTest/hap` 的 HMTG1.0.4.hap 等样本中找到 65 个包含 `copyrestargs` 的方法
+   - 验证反编译签名均正确显示 `...argN`（例如 `LogUtil` 系列、`CharacterSetECI` 构造器）
 
 ### 优先级 P2
 3. **增强常量折叠** ✅ - 在 `AlgebraicSimplificationPass` 中实现真正的常量-常量求值：二元数值运算、位运算、比较、`IsTrue`/`IsFalse`、`TypeOf`、`ToNumber`/`ToNumeric`、字符串拼接、`BigInt`；修复 `isZero`/`isOne` 对整数常量的识别；新增 `AlgebraicSimplificationPassTest`

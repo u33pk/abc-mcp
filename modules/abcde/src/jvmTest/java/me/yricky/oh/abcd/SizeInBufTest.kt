@@ -2,32 +2,32 @@ package me.yricky.oh.abcd
 
 import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.common.wrapAsLEByteBuf
+import org.junit.Assume
+import org.junit.Test
 import java.io.File
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
-import org.junit.Test
-
-
 
 class SizeInBufTest {
-    val file = File("/home/orz/project/unitTest/kazumi/ets/modules.abc")
-    val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
-    val abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+    private val file = File("/Users/vv/project/unitTest/kazumi/ets/modules.abc")
+    private val abc by lazy {
+        val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY, 0, file.length())
+        AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+    }
 
     @Test
-    fun testMethod(){
+    fun testMethod() {
+        Assume.assumeTrue("Kazumi ABC not found: $file", file.exists())
         println("file size: ${file.length()}")
         var iSize = 0
         var eSize = 0
         abc.classes.forEach { l ->
             val it = l.value
-            if(it is AbcClass) {
+            if (it is AbcClass) {
                 iSize += it.intrinsicSize
                 eSize += it.externalSize
-//                println("${it.name}")
             }
         }
         println("total size:${iSize + eSize} \nintrinsicSize:${iSize}\nexternalSize:${eSize}")
     }
-
 }

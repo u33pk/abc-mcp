@@ -101,7 +101,9 @@ class StructuredToJs(val asm: Asm) {
         return try {
             // 生成函数头（使用解码后的方法名）
             val methodName = decodeMethodName(asm.code.method)
-            val restIndex = asm.irOpList.filterIsInstance<IrOp.CopyRestArgs>().firstOrNull()?.startIdx ?: -1
+            val restIndex = asm.irOpList.mapNotNull { op ->
+                (op as? IrOp.AssignReg)?.right as? IrOp.CopyRestArgs
+            }.firstOrNull()?.startIdx ?: -1
             sb.safeAppend("function $methodName${asm.code.method.argsStr(restIndex)} {\n")
 
             // 生成函数体（直接写入 sb，确保超出预算时保留尽可能多的部分输出）

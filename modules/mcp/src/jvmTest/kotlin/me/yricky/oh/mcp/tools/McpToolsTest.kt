@@ -2,17 +2,23 @@ package me.yricky.oh.mcp.tools
 
 import kotlinx.serialization.json.*
 import me.yricky.oh.mcp.session.SessionManager
+import org.junit.Assume
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class McpToolsTest {
 
     private val sessionManager = SessionManager()
     private val registry = ToolRegistry(sessionManager)
 
-    private val abcDir = "/home/orz/project/unitTest/out"
-    private val hapFile = "/home/orz/project/unitTest/kazumi/Kazumi_ohos_2.1.5_unsigned.hap"
-    private val resIndexFile = "/home/orz/project/unitTest/kazumi/test_resources.index"
+    private val abcDir = "/Users/vv/project/unitTest/out"
+    private val hapFile = "/Users/vv/project/unitTest/kazumi/Kazumi_ohos_2.1.5_unsigned.hap"
+    private val resIndexFile = "/Users/vv/project/unitTest/kazumi/test_resources.index"
+
+    private fun assumeFile(path: String) {
+        Assume.assumeTrue("Test file not found: $path", File(path).exists())
+    }
 
     private fun callTool(name: String, vararg pairs: Pair<String, JsonElement>): String {
         val args = buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }
@@ -21,6 +27,7 @@ class McpToolsTest {
 
     @Test
     fun testOpenAbc() {
+        assumeFile("$abcDir/emptyobj.abc")
         val result = callTool("open_abc", "path" to JsonPrimitive("$abcDir/emptyobj.abc"))
         println(result)
         assertTrue("Should contain opened path", result.contains("Opened:"))
@@ -38,6 +45,7 @@ class McpToolsTest {
 
     @Test
     fun testListClasses() {
+        assumeFile("$abcDir/emptyobj.abc")
         val result = callTool("list_classes", "path" to JsonPrimitive("$abcDir/emptyobj.abc"))
         println(result)
         assertTrue("Should list _GLOBAL class", result.contains("_GLOBAL"))
@@ -46,6 +54,7 @@ class McpToolsTest {
 
     @Test
     fun testListClassesWithFilter() {
+        assumeFile("$abcDir/call_dynamic.abc")
         val result = callTool(
             "list_classes",
             "path" to JsonPrimitive("$abcDir/call_dynamic.abc"),
@@ -57,6 +66,7 @@ class McpToolsTest {
 
     @Test
     fun testGetClassDetail() {
+        assumeFile("$abcDir/emptyobj.abc")
         val result = callTool(
             "get_class_detail",
             "path" to JsonPrimitive("$abcDir/emptyobj.abc"),
@@ -69,6 +79,7 @@ class McpToolsTest {
 
     @Test
     fun testGetClassDetailNotFound() {
+        assumeFile("$abcDir/emptyobj.abc")
         val result = callTool(
             "get_class_detail",
             "path" to JsonPrimitive("$abcDir/emptyobj.abc"),
@@ -80,6 +91,7 @@ class McpToolsTest {
 
     @Test
     fun testDecompileClass() {
+        assumeFile("$abcDir/emptyobj.abc")
         val result = callTool(
             "decompile_class",
             "path" to JsonPrimitive("$abcDir/emptyobj.abc"),
@@ -92,6 +104,7 @@ class McpToolsTest {
 
     @Test
     fun testDecompileMethod() {
+        assumeFile("$abcDir/call_dynamic.abc")
         val result = callTool(
             "decompile_method",
             "path" to JsonPrimitive("$abcDir/call_dynamic.abc"),
@@ -105,6 +118,7 @@ class McpToolsTest {
 
     @Test
     fun testDecompileMethodNotFound() {
+        assumeFile("$abcDir/call_dynamic.abc")
         val result = callTool(
             "decompile_method",
             "path" to JsonPrimitive("$abcDir/call_dynamic.abc"),
@@ -117,6 +131,7 @@ class McpToolsTest {
 
     @Test
     fun testSearchStrings() {
+        assumeFile("$abcDir/call_dynamic.abc")
         val result = callTool(
             "search_strings",
             "path" to JsonPrimitive("$abcDir/call_dynamic.abc"),
@@ -129,6 +144,7 @@ class McpToolsTest {
 
     @Test
     fun testSearchStringsNoMatch() {
+        assumeFile("$abcDir/call_dynamic.abc")
         val result = callTool(
             "search_strings",
             "path" to JsonPrimitive("$abcDir/call_dynamic.abc"),
@@ -140,6 +156,7 @@ class McpToolsTest {
 
     @Test
     fun testDisassembleMethod() {
+        assumeFile("$abcDir/call_dynamic.abc")
         val result = callTool(
             "disassemble_method",
             "path" to JsonPrimitive("$abcDir/call_dynamic.abc"),
@@ -153,6 +170,7 @@ class McpToolsTest {
 
     @Test
     fun testGetMethodInfo() {
+        assumeFile("$abcDir/call_dynamic.abc")
         val result = callTool(
             "get_method_info",
             "path" to JsonPrimitive("$abcDir/call_dynamic.abc"),
@@ -167,6 +185,7 @@ class McpToolsTest {
 
     @Test
     fun testOpenHap() {
+        assumeFile(hapFile)
         val result = callTool("open_hap", "path" to JsonPrimitive(hapFile))
         println(result)
         assertTrue("Should contain HAP header", result.contains("=== HAP File:"))
@@ -177,6 +196,7 @@ class McpToolsTest {
 
     @Test
     fun testGetHapManifest() {
+        assumeFile(hapFile)
         val result = callTool("get_hap_manifest", "path" to JsonPrimitive(hapFile))
         println(result)
         assertTrue("Should contain bundle name", result.contains("bundleName: com.predidit.kazumi"))
@@ -185,6 +205,7 @@ class McpToolsTest {
 
     @Test
     fun testGetObfuscationMapNotFound() {
+        assumeFile(hapFile)
         val result = callTool("get_obfuscation_map", "path" to JsonPrimitive(hapFile))
         println(result)
         assertTrue("Should report missing obfuscation map", result.contains("obfuscation.map not found"))
@@ -192,6 +213,7 @@ class McpToolsTest {
 
     @Test
     fun testSearchResources() {
+        assumeFile(resIndexFile)
         val result = callTool(
             "search_resources",
             "path" to JsonPrimitive(resIndexFile),
@@ -203,6 +225,7 @@ class McpToolsTest {
 
     @Test
     fun testSearchResourcesNoMatch() {
+        assumeFile(resIndexFile)
         val result = callTool(
             "search_resources",
             "path" to JsonPrimitive(resIndexFile),
@@ -214,6 +237,7 @@ class McpToolsTest {
 
     @Test
     fun testResolveResource() {
+        assumeFile(resIndexFile)
         val result = callTool(
             "resolve_resource",
             "path" to JsonPrimitive(resIndexFile),

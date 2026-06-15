@@ -5,15 +5,21 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.mcp.session.SessionManager
+import org.junit.Assume
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class GetClassHierarchyToolTest {
 
     private val sessionManager = SessionManager()
     private val registry = ToolRegistry(sessionManager)
 
-    private val kazumiAbc = "/home/orz/project/unitTest/kazumi/ets/modules.abc"
+    private val kazumiAbc = "/Users/vv/project/unitTest/kazumi/ets/modules.abc"
+
+    private fun assumeAbc() {
+        Assume.assumeTrue("Kazumi ABC not found: $kazumiAbc", File(kazumiAbc).exists())
+    }
 
     private fun callTool(name: String, vararg pairs: Pair<String, JsonElement>): String {
         val args = buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }
@@ -22,6 +28,7 @@ class GetClassHierarchyToolTest {
 
     @Test
     fun testGetClassHierarchy() {
+        assumeAbc()
         val abc = sessionManager.getOrOpen(kazumiAbc)
         val entryAbility = abc.classes.values.filterIsInstance<AbcClass>()
             .find { it.name.endsWith("/EntryAbility") }
@@ -40,6 +47,7 @@ class GetClassHierarchyToolTest {
 
     @Test
     fun testGetClassHierarchyForExternalParent() {
+        assumeAbc()
         // FlutterAbility 自身也作为类出现在 ABC 中（来自外部模块），应能查到它的子类 EntryAbility
         val abc = sessionManager.getOrOpen(kazumiAbc)
         val flutterAbility = abc.classes.values.filterIsInstance<AbcClass>()
@@ -57,6 +65,7 @@ class GetClassHierarchyToolTest {
 
     @Test
     fun testClassNotFound() {
+        assumeAbc()
         val result = callTool(
             "get_class_hierarchy",
             "path" to JsonPrimitive(kazumiAbc),

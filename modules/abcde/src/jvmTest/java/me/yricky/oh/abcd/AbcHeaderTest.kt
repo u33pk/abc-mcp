@@ -4,19 +4,27 @@ import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.abcd.cfm.MethodTag
 import me.yricky.oh.common.wrapAsLEByteBuf
 import me.yricky.oh.utils.Adler32
+import org.junit.Assume
+import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
 
-class AbcHeaderTest{
-    val file = File("/home/orz/project/unitTest/kazumi/ets/modules.abc")
-    val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
-    val abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+class AbcHeaderTest {
+    private val file = File("/Users/vv/project/unitTest/kazumi/ets/modules.abc")
+    private lateinit var abc: AbcBuf
+
+    @Before
+    fun setup() {
+        Assume.assumeTrue("Kazumi ABC not found: $file", file.exists())
+        val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY, 0, file.length())
+        abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+    }
 
     @OptIn(ExperimentalStdlibApi::class)
     @Test
-    fun testHeaders(){
+    fun testHeaders() {
         println("|------------HEADER START------------|")
         println("  magic:${abc.header.magic.toHexString()}")
         println("  checksum:${abc.header.checkSum.toString(16)}")
@@ -34,35 +42,25 @@ class AbcHeaderTest{
     }
 
     @Test
-    fun testCheckSum(){
-        println(String.format("%08X",abc.header.checkSum))
+    fun testCheckSum() {
+        println(String.format("%08X", abc.header.checkSum))
         val adler32 = Adler32()
-        adler32.update(abc.buf.slice(12,abc.buf.limit() - 12))
-        println(String.format("%08X",adler32.value()))
+        adler32.update(abc.buf.slice(12, abc.buf.limit() - 12))
+        println(String.format("%08X", adler32.value()))
     }
 
     @Test
-    fun testRegion(){
+    fun testRegion() {
         abc.regions.forEach {
             println(it)
-//            println("${it.protos.size},${it.protos.map { it.shorty }},")
-//            it.classes.forEach {
-//                println("class:${it.name}")
-//            }
-//            it.methods.forEach {
-//                println("method:${it.name}")
-//            }
-//            it.fields.forEach {
-//                println("field:${it.name}")
-//            }
         }
     }
 
     @Test
-    fun testClasses(){
+    fun testClasses() {
         abc.classes.forEach { l ->
             val it = l.value
-            if(it is AbcClass) {
+            if (it is AbcClass) {
                 println("${it.region}c:${it.name}\n${it.data}")
                 it.fields.forEach {
                     println("(f)\t${it.name}")
@@ -77,18 +75,17 @@ class AbcHeaderTest{
     }
 
     @Test
-    fun testMethod(){
+    fun testMethod() {
         abc.classes.forEach { l ->
             val it = l.value
-            if(it is AbcClass) {
-//                println("${it.name}")
+            if (it is AbcClass) {
                 it.methods.filter { (it.codeItem?.triesSize ?: 0) > 0 }.forEach {
                     println("(m) ${it.clazz?.name} ${it.indexData.functionKind} ${it.name}")
                     it.data.forEach { t ->
-                        if(t is MethodTag.Anno){
+                        if (t is MethodTag.Anno) {
                             val anno = t.anno
                             println("  annoType(${anno.clazz?.name}):${anno.elements.map { it.toString(abc) }}")
-                        }else if (t is MethodTag.ParamAnno){
+                        } else if (t is MethodTag.ParamAnno) {
                             val annos = t.get(abc)
                             println("  pAnnoCount:${annos.count}")
                         }
@@ -105,25 +102,18 @@ class AbcHeaderTest{
         }
     }
 
-//    @Test
-//    fun testLA(){
-//        abc.literalArrays.forEachIndexed { i,it ->
-//            if(!abc.moduleLiteralArrays.containsKey(it.offset)){
-//                println("${i} ${it.offset.toString(16)} size:${it.size}, ${it.content}")
-//            }
-//        }
-//    }
-
     @Test
-    fun testModuleLA(){
+    fun testModuleLA() {
         val moduleLiteralArrays = abc.classes.mapNotNull { (it.value as? AbcClass)?.moduleInfo }
         moduleLiteralArrays.forEach { u ->
-            println("${u.offset.toString(16)} | ${u.moduleRequests}" +
-                    "\n    ${u.regularImports}" +
-                    "\n    ${u.namespaceImports}" +
-                    "\n    ${u.localExports}" +
-                    "\n    ${u.indirectExports}" +
-                    "\n    ${u.starExports}")
+            println(
+                "${u.offset.toString(16)} | ${u.moduleRequests}" +
+                        "\n    ${u.regularImports}" +
+                        "\n    ${u.namespaceImports}" +
+                        "\n    ${u.localExports}" +
+                        "\n    ${u.indirectExports}" +
+                        "\n    ${u.starExports}"
+            )
         }
         println("size:${moduleLiteralArrays.size}")
     }

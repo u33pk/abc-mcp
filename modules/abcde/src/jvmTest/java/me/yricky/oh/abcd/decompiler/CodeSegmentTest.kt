@@ -4,38 +4,46 @@ import me.yricky.oh.abcd.AbcBuf
 import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.abcd.isa.asmName
 import me.yricky.oh.common.wrapAsLEByteBuf
+import org.junit.Assume
 import org.junit.Test
 import java.io.File
 import java.io.OutputStreamWriter
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
 
-class CodeSegmentTest{
+class CodeSegmentTest {
+
+    private fun openAbc(): AbcBuf? {
+        val path = System.getenv("abcPath") ?: "/Users/vv/project/unitTest/kazumi/ets/modules.abc"
+        val file = File(path)
+        if (!file.exists()) return null
+        val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY, 0, file.length())
+        return AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+    }
+
     @Test
-    fun testGenLinear(){
-        println(System.getenv("abcPath"))
-        val file = File(System.getenv("abcPath"))
-        val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
-        val abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+    fun testGenLinear() {
+        val abc = openAbc()
+        Assume.assumeNotNull(abc)
+        abc!!
         var totalCount = 0
-//        var passCount = 0
         abc.classes.asSequence().mapNotNull { it.value as? AbcClass }
             .mapNotNull { it.methods.find { it.name == "func_main_0" } }
             .mapNotNull { it.codeItem }
             .forEach {
                 totalCount++
-                if(it.tryBlocks.isEmpty()){
+                if (it.tryBlocks.isEmpty()) {
                     CodeSegment.genLinear(it.asm)
                 }
             }
+        println("genLinear total: $totalCount")
     }
 
     @Test
-    fun test(){
-        println(System.getenv("abcPath"))
-        val file = File(System.getenv("abcPath"))
-        val mmap = FileChannel.open(file.toPath()).map(FileChannel.MapMode.READ_ONLY,0,file.length())
-        val abc = AbcBuf("", wrapAsLEByteBuf(mmap.order(ByteOrder.LITTLE_ENDIAN)))
+    fun test() {
+        val abc = openAbc()
+        Assume.assumeNotNull(abc)
+        abc!!
         var totalCount = 0
         var passCount = 0
         var uIByteCodeCount = 0
@@ -43,17 +51,16 @@ class CodeSegmentTest{
         var assertFailedCount = 0
         var lErrCount = 0
 
-        File(file.parentFile,"pass.txt").let {
+        File("/tmp/pass.txt").let {
             println(it.absolutePath)
-            if(it.exists()){
-                it.renameTo(File(file.parentFile,"pass.txt.old"))
+            if (it.exists()) {
+                it.renameTo(File("/tmp/pass.txt.old"))
             }
         }
-        val passFile = File(file.parentFile,"pass.txt")
-        val oldPassFile = File(file.parentFile,"pass.txt.old")
+        val passFile = File("/tmp/pass.txt")
         passFile.createNewFile()
         val fos = OutputStreamWriter(passFile.outputStream())
-        val unIMap = mutableMapOf<String,Int>()
+        val unIMap = mutableMapOf<String, Int>()
 
         abc.classes.asSequence().mapNotNull { it.value as? AbcClass }
             .flatMap { it.methods }
@@ -64,20 +71,18 @@ class CodeSegmentTest{
                     ToJs(it.asm).toJS(true)
                     fos.append(it.method.name).append('\n')
                     passCount++
-                } catch (e:ToJs.UnImplementedError){
+                } catch (e: ToJs.UnImplementedError) {
                     unIMap[e.item.asmName] = (unIMap[e.item.asmName] ?: 0) + 1
                     uIByteCodeCount++
-                } catch (_:NotImplementedError){
+                } catch (_: NotImplementedError) {
                     othUnImplCount++
-                } catch (_:AssertionError) {
+                } catch (_: AssertionError) {
                     assertFailedCount++
-                } catch (_:IllegalStateException) {
+                } catch (_: IllegalStateException) {
                     lErrCount++
                 }
-//                if(it.tryBlocks.isEmpty()){
-//
-//                }
             }
+        fos.close()
         println("total:${totalCount},pass:${passCount}(${passCount * 100.0 / totalCount}%)\nUnImplementedByteCodeCount:${uIByteCodeCount},othUnImplCount:${othUnImplCount},assertFailedCount:${assertFailedCount},lErrCount:${lErrCount}")
         println("unImpl bytecodes:")
         unIMap.asSequence().sortedBy { -it.value }.forEach {

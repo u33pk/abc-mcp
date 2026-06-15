@@ -3,16 +3,22 @@ package me.yricky.oh.mcp.tools
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import me.yricky.oh.mcp.session.SessionManager
+import org.junit.Assume
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class SearchInMethodToolTest {
 
     private val sessionManager = SessionManager()
     private val registry = ToolRegistry(sessionManager)
 
-    private val abcDir = "/home/orz/project/unitTest/out"
-    private val kazumiAbc = "/home/orz/project/unitTest/kazumi/ets/modules.abc"
+    private val abcDir = "/Users/vv/project/unitTest/out"
+    private val kazumiAbc = "/Users/vv/project/unitTest/kazumi/ets/modules.abc"
+
+    private fun assumeFile(path: String) {
+        Assume.assumeTrue("Test file not found: $path", File(path).exists())
+    }
 
     private fun callTool(name: String, vararg pairs: Pair<String, JsonElement>): String {
         val args = kotlinx.serialization.json.buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }
@@ -21,6 +27,7 @@ class SearchInMethodToolTest {
 
     @Test
     fun testSearchInMethod() {
+        assumeFile("$abcDir/load_string_dynamic.abc")
         val result = callTool(
             "search_in_method",
             "path" to JsonPrimitive("$abcDir/load_string_dynamic.abc"),
@@ -36,6 +43,7 @@ class SearchInMethodToolTest {
 
     @Test
     fun testSearchStringInLargeMethod() {
+        assumeFile(kazumiAbc)
         // 在超大方法中搜索字符串，验证不触发完整反编译也能工作
         val result = callTool(
             "search_in_method",
@@ -53,6 +61,7 @@ class SearchInMethodToolTest {
 
     @Test
     fun testSearchInvalidRegex() {
+        assumeFile(kazumiAbc)
         val result = callTool(
             "search_in_method",
             "path" to JsonPrimitive(kazumiAbc),
