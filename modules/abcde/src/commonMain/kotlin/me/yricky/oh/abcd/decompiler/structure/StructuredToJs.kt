@@ -6,6 +6,10 @@ import me.yricky.oh.abcd.code.TryBlock
 import me.yricky.oh.abcd.decompiler.CodeSegment
 import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
+import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver.buildLexEnvStacks
+import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver.isLexEnvOp
+import me.yricky.oh.abcd.decompiler.structure.lexLvlSlot
+import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver.resolveLexName
 import me.yricky.oh.abcd.decompiler.structure.statement.DoWhileStatement
 import me.yricky.oh.abcd.decompiler.structure.statement.IfStatement
 import me.yricky.oh.abcd.decompiler.structure.statement.WhileStatement
@@ -78,6 +82,21 @@ class StructuredToJs(
     private val nsImports = mutableListOf<ModuleLiteralArray.NamespaceImport>()
     private val exports = mutableSetOf<ModuleLiteralArray.LocalExport>()
     private var outputSize = 0
+
+    /**
+     * 每个原始指令位置之前的词法环境栈快照
+     */
+    private val perOpStacks = buildLexEnvStacks(asm.irOpList)
+
+    /**
+     * 基本块起始偏移 -> 进入块时的词法环境栈
+     */
+    private val blockStartStack = asm.list.associate { it.codeOffset to perOpStacks[it.index] }
+
+    /**
+     * 当前正在生成的指令所处的词法环境栈
+     */
+    private var currentLexEnvStack: List<List<String?>> = emptyList()
 
     /**
      * 检查继续追加 [additional] 个字符是否会超过预算
@@ -425,17 +444,33 @@ class StructuredToJs(
             out.safeAppend("${indentStr}// try [0x${start.toString(16)},0x${end.toString(16)})\n")
         }
 
+        // 设置当前词法环境栈（单指令块直接使用该指令之前的栈）
+        currentLexEnvStack = blockStartStack[block.item.codeOffset] ?: emptyList()
+
         when (block) {
             is CodeSegment.Linear -> {
-                // 收集所有指令并优化
-                val ops = block.map { it.irOp }.toList()
-                val liveOut = mutableSetOf<FunSimCtx.RegId>()
-                liveOut.add(FunSimCtx.RegId.ACC)
-                val optimizedOps = IrOpOptimizer.optimizeList(ops, liveOut)
+                val items = block.toList()
+                val containsLexEnvOps = items.any { isLexEnvOp(it.irOp) }
 
-                for (irOp in optimizedOps) {
-                    if (irOp is IrOp.NOP || irOp is IrOp.JustAnno) continue
-                    out.safeAppend("$indentStr${generateIrOp(irOp)}\n")
+                if (containsLexEnvOps) {
+                    // 块内含词法环境操作，按原始指令顺序逐条生成，确保名称解析精确
+                    for (item in items) {
+                        currentLexEnvStack = perOpStacks[item.index]
+                        val irOp = item.irOp
+                        if (irOp is IrOp.NOP || irOp is IrOp.JustAnno || isLexEnvOp(irOp)) continue
+                        out.safeAppend("$indentStr${generateIrOp(irOp)}\n")
+                    }
+                } else {
+                    // 收集所有指令并优化
+                    val ops = items.map { it.irOp }
+                    val liveOut = mutableSetOf<FunSimCtx.RegId>()
+                    liveOut.add(FunSimCtx.RegId.ACC)
+                    val optimizedOps = IrOpOptimizer.optimizeList(ops, liveOut)
+
+                    for (irOp in optimizedOps) {
+                        if (irOp is IrOp.NOP || irOp is IrOp.JustAnno) continue
+                        out.safeAppend("$indentStr${generateIrOp(irOp)}\n")
+                    }
                 }
             }
             is CodeSegment.Return -> {
@@ -470,7 +505,9 @@ class StructuredToJs(
             IrOp.Disabled -> "/* disabled */"
             IrOp.NOP -> ""
             IrOp.AsyncFunctionEnter -> ""
-            is IrOp.NewLex -> "/* newLex(${op.size}) */"
+            is IrOp.NewLexEnv -> ""
+            is IrOp.NewLexEnvWithName -> ""
+            IrOp.PopLexEnv -> ""
             is IrOp.UnImplemented -> "/* unimplemented: ${op.item.asmName} */"
             is IrOp.JustAnno -> "/* ${op.anno} */"
             is IrOp.Statement -> {
@@ -490,6 +527,7 @@ class StructuredToJs(
                         "$name = ${generateExpression(op.right)};"
                     }
                     is IrOp.Await -> "_acc_ = await ${generateExpression(op.source)};"
+                    is IrOp.SpreadIntoArray -> "${generateRegId(op.arrReg)}.push(...${generateExpression(op.source)});"
                 }
             }
         }
@@ -531,6 +569,7 @@ class StructuredToJs(
             is IrOp.LoadReg -> generateRegId(exp.regId)
             is IrOp.NewClass -> "/* newClass */"
             is IrOp.NewInst -> "new ${generateRegId(exp.clazz)}(${exp.constructorArgs.joinToString { generateRegId(it) }})"
+            is IrOp.ArrayLiteral -> generateArrayLiteral(exp)
             is IrOp.CopyRestArgs -> "Array.prototype.slice.call(arguments, ${exp.startIdx})"
             is IrOp.ObjField.Index -> "${generateExpression(exp.obj)}[${exp.index}]"
             is IrOp.ObjField.Name -> "${generateExpression(exp.obj)}.${exp.name}"
@@ -567,7 +606,30 @@ class StructuredToJs(
             return "AtkTsGlobal"
         } else if (regId == FunSimCtx.RegId.THIS) {
             return "this"
+        } else if (regId.value and FunSimCtx.RegId.MASK == FunSimCtx.RegId.MASK_LEX) {
+            val (lvl, slot) = regId.lexLvlSlot() ?: return regId.toJS()
+            return resolveLexName(currentLexEnvStack, lvl, slot) ?: "__lex${lvl}_${slot}__"
         } else return regId.toJS()
+    }
+
+    /**
+     * 生成数组字面量表达式
+     */
+    private fun generateArrayLiteral(arrayLiteral: IrOp.ArrayLiteral): String {
+        val elements = arrayLiteral.elements
+        return if (elements.size > MAX_LITERAL_ARRAY_SIZE) {
+            val preview = elements.take(MAX_LITERAL_ARRAY_SIZE).joinToString(",") { generateArrayElement(it) }
+            "[$preview,/* ... ${elements.size - MAX_LITERAL_ARRAY_SIZE} more items */]"
+        } else {
+            elements.joinToString(",", "[", "]") { generateArrayElement(it) }
+        }
+    }
+
+    private fun generateArrayElement(element: IrOp.ArrayElement): String {
+        return when (element) {
+            is IrOp.ArrayElement.Expr -> generateExpression(element.expr)
+            is IrOp.ArrayElement.Spread -> "...${generateExpression(element.expr)}"
+        }
     }
 
     /**

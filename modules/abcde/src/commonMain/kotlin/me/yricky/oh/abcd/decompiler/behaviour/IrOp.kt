@@ -23,7 +23,11 @@ sealed interface IrOp {
                         0x14.toByte() -> UaExp.IsFalse(LoadReg.acc).st2Acc()
                         else -> UnImplemented(item)
                     }
-                    0xfc.toByte() -> Deprecated
+                    0xfc.toByte() -> when(opCode){
+                        // deprecated.poplexenv：与 poplexenv 语义相同，弹出当前词法环境
+                        0x01.toByte() -> PopLexEnv
+                        else -> Deprecated
+                    }
                     0xfd.toByte() -> when(opCode){
                         0x0a.toByte() -> AssignObj(ObjField.Index(regId(item.opUnits[2]), item.opUnits[3].toUnsignedInt()), LoadReg.acc)
                         0x0b.toByte() -> CopyRestArgs((item.opUnits[2] as Short).toUShort().toInt()).st2Acc()
@@ -68,6 +72,12 @@ sealed interface IrOp {
                             val firstArg = item.opUnits[3].toUnsignedInt()
                             CallAcc((0 until argCount).map { regId(firstArg + it) }, regId(thisReg)).st2Acc()
                         }
+
+                        // wide.newlexenv imm:u16
+                        0x02.toByte() -> NewLexEnv(item.opUnits[2].toUnsignedInt())
+                        // wide.newlexenvwithname imm:u16, literalarray_id
+                        0x03.toByte() -> NewLexEnvWithName(item.opUnits[2].toUnsignedInt(), parseLexEnvNames(item))
+
                         else -> UnImplemented(item)
                     }
                     0xfe.toByte() -> when(opCode){
@@ -76,6 +86,11 @@ sealed interface IrOp {
                         0x02.toByte() -> Throw.Error("patternnoncoercible")
                         0x03.toByte() -> Throw.Error("deletesuperproperty")
                         0x04.toByte() -> Throw.Error("constassignment", "${item.ins.format[2]}")
+
+                        // throw.ifsupernotcorrectcall：方舟编译器在 super() / super.method() 调用前插入的运行时校验。
+                        // 正常代码不会触发，无对应 TS/ArkTS 语法，按编译器 bookkeeping 处理为 NOP，避免污染反编译输出。
+                        0x07.toByte() -> NOP
+                        0x08.toByte() -> NOP
 
                         0x09.toByte() -> JustAnno("acc: ${(item.ins.format[2] as InstFmt.SId).getString(item)}")
                         else -> UnImplemented(item)
@@ -90,8 +105,10 @@ sealed interface IrOp {
                 0x02.toByte() -> JSValue.True.just().st2Acc()
                 0x03.toByte() -> JSValue.False.just().st2Acc()
                 0x04.toByte() -> JSValue.ObjInst(emptyMap()).just().st2Acc()
-                0x05.toByte() -> JSValue.ArrInst(emptyList()).just().st2Acc()
-                0x06.toByte() -> JSValue.asArr(item.asm,(item.ins.format[2] as InstFmt.LId).getLA(item)).just().st2Acc()
+                0x05.toByte() -> ArrayLiteral(emptyList()).st2Acc()
+                0x06.toByte() -> ArrayLiteral(
+                    JSValue.asArr(item.asm,(item.ins.format[2] as InstFmt.LId).getLA(item)).content.map { ArrayElement.Expr(it.just()) }
+                ).st2Acc()
                 0x07.toByte() -> JSValue.asObj(item.asm,(item.ins.format[2] as InstFmt.LId).getLA(item)).just().st2Acc()
                 0x08.toByte() -> {
                     val clazz = item.opUnits[3].toUnsignedInt()
@@ -99,7 +116,7 @@ sealed interface IrOp {
                     val args = if(argC.toUnsignedInt() > 1) ((clazz + 1) until (clazz + argC)) else emptyList()
                     AssignReg(FunSimCtx.RegId.ACC, NewInst(regId(clazz), args.map { regId(it) }))
                 }
-                0x09.toByte() -> NewLex(item.opUnits[1].toUnsignedInt())
+                0x09.toByte() -> NewLexEnv(item.opUnits[1].toUnsignedInt())
                 0x0a.toByte() -> BiExp.Add(regId(item.opUnits[2]).ld(), LoadReg.acc).st2Acc()
                 0x0b.toByte() -> BiExp.Sub(regId(item.opUnits[2]).ld(), LoadReg.acc).st2Acc()
                 0x0c.toByte() -> BiExp.Mul(regId(item.opUnits[2]).ld(), LoadReg.acc).st2Acc()
@@ -221,6 +238,8 @@ sealed interface IrOp {
                 0x64.toByte() -> Return.ReturnAcc
                 0x65.toByte() -> Return.ReturnUndefined
 
+                0x69.toByte() -> PopLexEnv
+
                 0x6a.toByte() -> JSValue.Nan.just().st2Acc()
                 0x6b.toByte() -> JSValue.Infinity.just().st2Acc()
                 0x6c.toByte() -> LoadReg(FunSimCtx.RegId.ARGUMENTS).st2Acc()
@@ -268,8 +287,10 @@ sealed interface IrOp {
 
                 0x7f.toByte() -> AssignObj(ObjField.Name(FunSimCtx.RegId.GLOBAL, (item.ins.format[2] as InstFmt.SId).getString(item)), LoadReg.acc) // stglobalvar
 
-                0x80.toByte() -> JSValue.ArrInst(emptyList()).just().st2Acc()
-                0x81.toByte() -> JSValue.asArr(item.asm,(item.ins.format[2] as InstFmt.LId).getLA(item)).just().st2Acc()
+                0x80.toByte() -> ArrayLiteral(emptyList()).st2Acc()
+                0x81.toByte() -> ArrayLiteral(
+                    JSValue.asArr(item.asm,(item.ins.format[2] as InstFmt.LId).getLA(item)).content.map { ArrayElement.Expr(it.just()) }
+                ).st2Acc()
                 0x82.toByte() -> JSValue.asObj(item.asm,(item.ins.format[2] as InstFmt.LId).getLA(item)).just().st2Acc()
                 0x83.toByte() -> {
                     val clazz = item.opUnits[3].toUnsignedInt()
@@ -304,6 +325,7 @@ sealed interface IrOp {
                 0xae.toByte() -> AsyncFunctionEnter            // asyncfunctionenter
                 0xb0.toByte() -> Debugger
                 0xb1.toByte() -> NOP                           // creategeneratorobj
+                0xb6.toByte() -> NewLexEnvWithName(item.opUnits[1].toUnsignedInt(), parseLexEnvNames(item)) // newlexenvwithname
                 0xb7.toByte() -> NOP                           // createasyncgeneratorobj
                 0xb8.toByte() -> NOP                           // asyncgeneratorresolve
                 0x97.toByte() -> NOP                           // asyncgeneratorreject
@@ -335,6 +357,14 @@ sealed interface IrOp {
                 0xd6.toByte() -> NOP                                              // setgeneratorstate
                 0xd7.toByte() -> UaExp.GetAsyncIterator(LoadReg.acc).st2Acc()     // getasynciterator
 
+                /**
+                 * starrayspread v0, v1
+                 * v0: 目标数组寄存器
+                 * v1: 插入位置索引寄存器（TS 数组字面量中可忽略，按顺序展开）
+                 * ACC: 待展开的可迭代对象
+                 */
+                0xc6.toByte() -> SpreadIntoArray(regId(item.opUnits[1]), LoadReg.acc)
+
                 0xc7.toByte() -> AssignObj(ObjField.Name(LoadReg.ACC, JSValue.PROTO), regId(item.opUnits[2]).ld())
                 0xc8.toByte() -> AssignObj(ObjField.Value(regId(item.opUnits[2]), regId(item.opUnits[3])), LoadReg.acc)
 
@@ -365,6 +395,35 @@ sealed interface IrOp {
                 else -> UnImplemented(item)
             }
         }
+
+        /**
+         * 解析 newlexenvwithname 引用的 literal array，得到每个槽位的变量名。
+         * literal array 格式：I32:N, (Str:name, I32:slot) * N
+         */
+        private fun parseLexEnvNames(item: AsmItem): List<String?> {
+            return try {
+                val la = (item.ins.format[2] as InstFmt.LId).getLA(item)
+                val content = la.content
+                if (content.isEmpty()) return emptyList()
+                val sizeLit = content[0] as? LiteralArray.Literal.I32 ?: return emptyList()
+                val size = sizeLit.value
+                if (size <= 0) return emptyList()
+                val names = MutableList<String?>(size) { null }
+                var i = 1
+                while (i + 1 < content.size) {
+                    val nameLit = content[i] as? LiteralArray.Literal.Str ?: break
+                    val slotLit = content[i + 1] as? LiteralArray.Literal.I32 ?: break
+                    val slot = slotLit.value
+                    if (slot in names.indices) {
+                        names[slot] = nameLit.get(item.asm.code.abc)
+                    }
+                    i += 2
+                }
+                names
+            } catch (_: Throwable) {
+                emptyList()
+            }
+        }
     }
 
     class UnImplemented(val item: AsmItem): IrOp
@@ -377,7 +436,21 @@ sealed interface IrOp {
     object AsyncFunctionEnter: TraitNOP // 标记当前函数为 async 函数
     object Disabled: IrOp //指令功能未使能，暂不可用。
     object Deprecated: IrOp
-    class NewLex(val size:Int): IrOp
+    /**
+     * 创建无名称词法环境（newlexenv / wide.newlexenv）
+     */
+    class NewLexEnv(val size: Int) : TraitNOP
+
+    /**
+     * 创建带名称词法环境（newlexenvwithname / wide.newlexenvwithname）
+     * [names] 按 slot 索引存放变量名，未知槽位为 null
+     */
+    class NewLexEnvWithName(val size: Int, val names: List<String?>) : TraitNOP
+
+    /**
+     * 弹出当前词法环境（poplexenv / deprecated.poplexenv）
+     */
+    object PopLexEnv : TraitNOP
 
 
     sealed interface Statement: IrOp, FunSimCtx.Effect
@@ -508,6 +581,34 @@ sealed interface IrOp {
      * @param startIdx rest 参数在形参列表中的起始位置（0-based，从第一个实际参数开始计数）
      */
     class CopyRestArgs(val startIdx: Int) : NoRegExpression
+
+    /**
+     * 数组字面量元素：普通表达式或展开表达式
+     */
+    sealed interface ArrayElement {
+        class Expr(val expr: Expression) : ArrayElement
+        class Spread(val expr: Expression) : ArrayElement
+    }
+
+    /**
+     * 数组字面量表达式 [elem1, elem2, ...spread]
+     */
+    class ArrayLiteral(val elements: List<ArrayElement>) : NoRegExpression {
+        override fun read(): Sequence<FunSimCtx.RegId> = elements.asSequence().flatMap {
+            when (it) {
+                is ArrayElement.Expr -> it.expr.read()
+                is ArrayElement.Spread -> it.expr.read()
+            }
+        }
+    }
+
+    /**
+     * 将可迭代对象展开到指定数组寄存器（starrayspread 的临时标记节点）
+     */
+    class SpreadIntoArray(val arrReg: FunSimCtx.RegId, val source: Expression) : Statement {
+        override fun read(): Sequence<FunSimCtx.RegId> = sequenceOf(arrReg) + source.read()
+        override fun effected(): Sequence<FunSimCtx.RegId> = sequenceOf(arrReg)
+    }
 
     /**
      * 一元表达式

@@ -18,7 +18,8 @@ object IrOpOptimizer {
      * 按顺序执行，迭代直到不动点
      */
     private val passes = listOf(
-        ExpressionPropagationPass,        // 表达式传播（最先：内联 + 合并函数调用）
+        ArraySpreadMergingPass,           // 数组展开合并（最先：将 starrayspread 合并到 ArrayLiteral）
+        ExpressionPropagationPass,        // 表达式传播（内联 + 合并函数调用）
         AlgebraicSimplificationPass,      // 代数化简
         CopyPropagationPass,              // 拷贝传播
         RedundantLoadEliminationPass,     // 重复 Load 消除（CopyProp 之后）

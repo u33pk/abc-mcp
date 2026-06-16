@@ -2,7 +2,9 @@ package me.yricky.oh.abcd.decompiler
 
 import me.yricky.oh.abcd.cfm.AbcMethod
 import me.yricky.oh.abcd.cfm.argsStr
+import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver
 import me.yricky.oh.abcd.decompiler.structure.decodeMethodName
+import me.yricky.oh.abcd.decompiler.structure.lexLvlSlot
 import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.JSValue
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
@@ -16,6 +18,16 @@ import me.yricky.oh.abcd.literal.ModuleLiteralArray
 
 class ToJs(val asm: Asm) {
     class UnImplementedError(val item:Asm.AsmItem):Throwable("对字节码${item.asmName}的解析尚未实现")
+
+    /**
+     * 每个原始指令位置之前的词法环境栈快照
+     */
+    private val perOpStacks = LexEnvNameResolver.buildLexEnvStacks(asm.irOpList)
+
+    /**
+     * 基本块起始偏移 -> 进入块时的词法环境栈
+     */
+    private val blockStartStack = asm.list.associate { it.codeOffset to perOpStacks[it.index] }
 
     fun toJS(enableOptimize: Boolean = true):String{
         val fc = FunctionDecompilerContext(enableOptimize)
@@ -38,7 +50,9 @@ class ToJs(val asm: Asm) {
             IrOp.Disabled -> "/* disabled */"
             IrOp.NOP -> ""
             IrOp.AsyncFunctionEnter -> ""
-            is IrOp.NewLex -> "/* newLex(${op.size}) */"
+            is IrOp.NewLexEnv -> ""
+            is IrOp.NewLexEnvWithName -> ""
+            IrOp.PopLexEnv -> ""
             is IrOp.UnImplemented -> throw UnImplementedError(op.item)
             is IrOp.JustAnno -> "/* ${op.anno} */"
             is IrOp.Statement -> {
@@ -54,6 +68,7 @@ class ToJs(val asm: Asm) {
                     is IrOp.DefineGetterSetter -> "Object.defineProperty(${toJS(op.obj)}, ${toJS(op.prop)}, {get: ${toJS(op.getter)}, set: ${toJS(op.setter)}});"
                     is IrOp.AssignModuleVar -> "${op.local.localName ?: "moduleSlot"} = ${toJS(op.right)};"
                     is IrOp.Await -> "_acc_ = await ${toJS(op.source)};"
+                    is IrOp.SpreadIntoArray -> "${toJS(op.arrReg)}.push(...${toJS(op.source)});"
                 }
             }
 
@@ -93,6 +108,7 @@ class ToJs(val asm: Asm) {
             is IrOp.LoadReg -> toJS(exp.regId)
             is IrOp.NewClass -> TODO("解析NewClass操作尚未实现")
             is IrOp.NewInst -> "new ${toJS(exp.clazz)}(${exp.constructorArgs.joinToString { toJS(it) }})"
+            is IrOp.ArrayLiteral -> toJS(exp)
             is IrOp.CopyRestArgs -> "Array.prototype.slice.call(arguments, ${exp.startIdx})"
             is IrOp.ObjField.Index -> "${toJS(exp.obj)}[${exp.index}]"
             is IrOp.ObjField.Name -> "${toJS(exp.obj)}.${exp.name}"
@@ -124,6 +140,17 @@ class ToJs(val asm: Asm) {
             is IrOp.BiExp.StrictEq -> toJS(IrOp.BiExp.StrictNEq(exp.l,exp.r))
             is IrOp.BiExp.StrictNEq -> toJS(IrOp.BiExp.StrictEq(exp.l,exp.r))
             else -> "!(${toJS(exp)})"
+        }
+    }
+
+    private fun FunctionDecompilerContext.toJS(arrayLiteral: IrOp.ArrayLiteral): String {
+        return arrayLiteral.elements.joinToString(",", "[", "]") { toJS(it) }
+    }
+
+    private fun FunctionDecompilerContext.toJS(element: IrOp.ArrayElement): String {
+        return when (element) {
+            is IrOp.ArrayElement.Expr -> toJS(element.expr)
+            is IrOp.ArrayElement.Spread -> "...${toJS(element.expr)}"
         }
     }
 
@@ -175,14 +202,31 @@ class ToJs(val asm: Asm) {
             }
             is CodeSegment.Linear -> {
                 val sb = StringBuilder()
-                if(enableOptimize){
-                    optimize(linear.map { it.irOp })
+                currentLexEnvStack = blockStartStack[linear.item.codeOffset] ?: emptyList()
+                val items = linear.toList()
+                val containsLexEnvOps = items.any { LexEnvNameResolver.isLexEnvOp(it.irOp) }
+
+                if (containsLexEnvOps) {
+                    // 块内含词法环境操作，按原始指令顺序逐条生成，确保名称解析精确
+                    for (item in items) {
+                        currentLexEnvStack = perOpStacks[item.index]
+                        val op = item.irOp
+                        if (op is IrOp.NOP || op is IrOp.JustAnno || LexEnvNameResolver.isLexEnvOp(op)) continue
+                        sb.append("  ".repeat(indent))
+                        sb.append(toJS(op))
+                        sb.append("\n")
+                    }
                 } else {
-                    linear.map { it.irOp }
-                }.forEach { op ->
-                    sb.append("  ".repeat(indent))
-                    sb.append(toJS(op))
-                    sb.append("\n")
+                    val ops = if (enableOptimize) {
+                        optimize(items.asSequence().map { it.irOp })
+                    } else {
+                        items.asSequence().map { it.irOp }
+                    }
+                    ops.forEach { op ->
+                        sb.append("  ".repeat(indent))
+                        sb.append(toJS(op))
+                        sb.append("\n")
+                    }
                 }
                 sb.toString()
             }
@@ -253,7 +297,7 @@ class ToJs(val asm: Asm) {
         }
     }
 
-    private fun toJS(regId: FunSimCtx.RegId):String{
+    private fun FunctionDecompilerContext.toJS(regId: FunSimCtx.RegId):String{
         if(regId.isReg()){
             val v = regId.getRegV()
             val vRegs = asm.code.numVRegs
@@ -267,10 +311,17 @@ class ToJs(val asm: Asm) {
             return "AtkTsGlobal"
         } else if(regId == FunSimCtx.RegId.THIS) {
             return "this"
+        } else if (regId.value and FunSimCtx.RegId.MASK == FunSimCtx.RegId.MASK_LEX) {
+            val (lvl, slot) = regId.lexLvlSlot() ?: return regId.toJS()
+            return LexEnvNameResolver.resolveLexName(currentLexEnvStack, lvl, slot) ?: "__lex${lvl}_${slot}__"
         } else return regId.toJS()
     }
 
-    private class FunctionDecompilerContext(val enableOptimize: Boolean){
+    private inner class FunctionDecompilerContext(val enableOptimize: Boolean){
+        /**
+         * 当前正在生成的指令所处的词法环境栈
+         */
+        var currentLexEnvStack: List<List<String?>> = emptyList()
         val imports:MutableList<ModuleLiteralArray.RegularImport> = mutableListOf()
         val nsImports:MutableList<ModuleLiteralArray.NamespaceImport> = mutableListOf()
 
@@ -326,16 +377,6 @@ class ToJs(val asm: Asm) {
                 return true
             } else {
                 return false
-            }
-        }
-
-        sealed class OptimizableCase{
-            abstract fun judge(op: IrOp):Boolean
-
-            object AssignToAcc:OptimizableCase(){
-                override fun judge(op: IrOp): Boolean {
-                    return op is IrOp.Assign && op.assignLeftAcc
-                }
             }
         }
     }

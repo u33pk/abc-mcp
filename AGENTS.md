@@ -295,6 +295,27 @@ _acc_ = AtkTsGlobal.print(_acc_);
 14. **反编译输出优化** ✅
     - 过滤 `/* nop */` 和 `/* acc: xxx */` 注释，减少无意义输出
     - `ExpressionPropagationPass.resolveReg` 新增循环检测，防止寄存器引用链无限递归
+15. **`throw.ifsupernotcorrectcall` 指令实现** ✅
+    - 实现 `throw.ifsupernotcorrectcall`（prefix `0xfe`，opcode `0x07` imm8 / `0x08` imm16）
+    - 该指令为方舟编译器在 `super()` / `super.method()` 调用前插入的运行时校验，正常代码不触发，无对应 TS/ArkTS 语法
+    - 映射为 `IrOp.NOP`，消除反编译输出中 `/* unimplemented: throw.ifsupernotcorrectcall */` 占位注释
+    - 在 `/home/orz/project/unitTest/hap` 样本中验证：455 个含该指令的方法均不再输出未实现注释
+16. **词法环境指令实现与变量名解析** ✅
+    - 实现 `newlexenv`（0x09）/ `wide.newlexenv`（0xfd 0x02）、`newlexenvwithname`（0xb6）/ `wide.newlexenvwithname`（0xfd 0x03）、`poplexenv`（0x69）/ `deprecated.poplexenv`（0xfc 0x01）
+    - 新增 IR 节点 `NewLexEnv` / `NewLexEnvWithName` / `PopLexEnv`（均为 NOP，不污染输出）
+    - 解析 `newlexenvwithname` 引用的 literal array，建立词法环境栈快照
+    - 在 `StructuredToJs` 与 `ToJs` 中按原始指令位置维护词法环境栈，将 `ldlexvar`/`stlexvar` 的 `__lex{lvl}_{slot}__` 占位符替换为真实变量名
+    - 对未知槽位或 `newlexenv`（无 name）回退 `__lex{lvl}_{slot}__`，避免输出混淆
+    - 新增 `LexEnvNameResolver` 工具类、`LexEnvNameResolutionTest` 单元测试、`LexEnvValidationTest` HAP 扫描验证
+    - 在 `/home/orz/project/unitTest/hap` 样本中验证：1562 个含词法环境指令的方法全部正确映射 IR，1180 个含 `newlexenvwithname` 的方法中 974 个成功将 `__lexXX__` 解析为真实名称
+17. **`starrayspread` 数组展开指令实现** ✅
+    - 新增 IR 模型：`ArrayElement` / `ArrayLiteral` / `SpreadIntoArray`
+    - 将 `createemptyarray` / `createarraywithbuffer` 映射为 `ArrayLiteral`，`starrayspread` 映射为以 ACC 为源对象的 `SpreadIntoArray`
+    - 实现 `ArraySpreadMergingPass`：将连续的 `SpreadIntoArray` 合并到可追踪的 `ArrayLiteral` 赋值中，生成 `[elem1, ...src, elemN]` 形式
+    - 无法追踪或源含副作用时降级为 `arr.push(...src);`，保证语义正确
+    - `StructuredToJs` / `ToJs` 新增数组字面量与展开元素渲染
+    - 新增 `ArraySpreadMergingPassTest` 单元测试、`StarrayspreadValidationTest` HAP 扫描验证
+    - 在 `/home/orz/project/unitTest/hap` 样本中验证：58 个含 `starrayspread` 的方法全部成功反编译，其中 34 个生成 `[...x]` 字面量形式（24 个因数组对象无法在同一基本块追踪而降级为 `.push(...)`）
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）
@@ -307,11 +328,30 @@ _acc_ = AtkTsGlobal.print(_acc_);
 
 | 类别 | 指令 | 命中 | 说明 |
 |------|------|------|------|
-| super 类型检查 | `throw.ifsupernotcorrectcall` | 700 | super 调用前的类型验证 |
-| 闭包 | `newlexenvwithname`/`poplexenv` | 197 | 词法环境创建/销毁 |
-| 其他 | `starrayspread`/`getiterator`/`throw.ifnotobject`/`callruntime.*` | 67 | 数组展开、迭代器、并发任务 |
+| 其他 | `getiterator`/`throw.ifnotobject`/`callruntime.*` | 42 | 迭代器、并发任务 |
 
-### 未来工作：class 语法重组
+> 当前 `/home/orz/project/unitTest/hap/hish.20250704.hap` 扫描结果（HISH）：34 处未实现，涉及 4 个 opcode——`callruntime.notifyconcurrentresult`(14)、`throw.ifnotobject`(13)、`getiterator`(6)、`callruntime.supercallforwardallargs`(1)。
+
+### 未来工作
+
+#### 词法环境指令输出优化
+
+当前词法环境名称解析已能正确工作，但在含 `newlexenv*` / `poplexenv` 的基本块中禁用了完整 IR 优化，导致输出保留 `_acc_ = arg0; menuItems = _acc_;` 这类 ACC 中转语法。下一步优化方向：
+
+1. **恢复词法环境块内的 ACC 拷贝传播**
+   - 目标：将 `_acc_ = X; Y = _acc_;` 合并为 `Y = X;`
+   - 依赖：修复/增强优化器对 lexical 变量（`__lexXX__`）和闭包作用域的处理
+2. **让词法环境节点在优化过程中可追踪**
+   - 当前 `NewLexEnv` / `NewLexEnvWithName` / `PopLexEnv` 为 `TraitNOP`，优化器直接透传
+   - 可改为非 NOP 标记节点，使优化器在传播表达式时 aware 到作用域边界，避免跨环境错误传播
+3. **消除 `.length` 链式膨胀等错误表达式**
+   - 在 `ExpressionPropagationPass` / `CopyPropagationPass` 中增加对 lexical 寄存器和循环引用的检测
+   - 参考 `ExpressionPropagationPass.resolveReg` 已有的循环检测机制，统一加到所有传播路径
+4. **补充回归测试**
+   - 在 `LexEnvValidationTest` 中增加断言：反编译输出不能出现 `.length` 无限重复等异常模式
+   - 选取 3~5 个典型闭包方法作为固定样本，检查输出语法正确性
+
+#### class 语法重组
 
 `func_main_0` 中的 `_newclass` + `definemethod` + `stmodulevar` 模式可重组为 `class Foo extends Bar { method() {...} }` 语法。当前 `definemethod` 作为 NOP 透传，不影响反编译流程但不生成 class 语法。
 
