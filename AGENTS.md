@@ -361,7 +361,14 @@ _acc_ = AtkTsGlobal.print(_acc_);
 
 #### class 语法重组
 
-`func_main_0` 中的 `_newclass` + `definemethod` + `stmodulevar` 模式可重组为 `class Foo extends Bar { method() {...} }` 语法。当前 `definemethod` 作为 NOP 透传，不影响反编译流程但不生成 class 语法。
+`func_main_0` 中的 `defineclasswithbuffer` + `definemethod` + `Object.defineProperty` 模式可重组为 `class Foo extends Bar { method() {...} }` 语法。当前 `definemethod` 作为 NOP 透传，不影响反编译流程但不生成 class 语法。
+
+调研结论：
+- `func_main_0` 是 ArkCompiler 生成的**模块入口函数**，对应 `.ets` 源文件的顶层作用域。
+- `get_class_detail` 目前返回的是**文件级 module record**，真正的 ArkTS 类藏在 `func_main_0` 的 `defineclasswithbuffer` 指令里。
+- class 重组应只提取 `func_main_0` 中的 class 创建块，其余 import、顶层变量、常量初始化等代码保持原样。
+
+详细方案见 [`docs/class-reconstruction-research.md`](docs/class-reconstruction-research.md)。
 
 ## 修改约定
 
