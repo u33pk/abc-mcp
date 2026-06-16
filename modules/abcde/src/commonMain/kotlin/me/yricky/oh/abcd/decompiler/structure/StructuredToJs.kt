@@ -6,11 +6,14 @@ import me.yricky.oh.abcd.code.TryBlock
 import me.yricky.oh.abcd.decompiler.CodeSegment
 import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
+import me.yricky.oh.abcd.decompiler.behaviour.JSValue
 import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver.buildLexEnvStacks
 import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver.isLexEnvOp
 import me.yricky.oh.abcd.decompiler.structure.lexLvlSlot
 import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver.resolveLexName
 import me.yricky.oh.abcd.decompiler.structure.statement.DoWhileStatement
+import me.yricky.oh.abcd.decompiler.structure.statement.ForInStatement
+import me.yricky.oh.abcd.decompiler.structure.statement.ForOfStatement
 import me.yricky.oh.abcd.decompiler.structure.statement.IfStatement
 import me.yricky.oh.abcd.decompiler.structure.statement.WhileStatement
 import me.yricky.oh.abcd.isa.Asm
@@ -221,7 +224,7 @@ class StructuredToJs(
         }
         val indentStr = "    ".repeat(indent)
 
-        for (statement in region.statements) {
+        for (statement in lowerIteratorLoops(region.statements)) {
             when (statement) {
                 is IfStatement -> {
                     val activeTries = findConditionTryBlocks(statement.condition)
@@ -259,10 +262,486 @@ class StructuredToJs(
                 is LinearStatement -> {
                     generateLinearBlock(statement.block, out, indent)
                 }
+                is ForOfStatement -> {
+                    out.safeAppend("${indentStr}for (const ${generateRegId(statement.loopVarReg)} of ${generateExpression(statement.iterable)}) {\n")
+                    generateRegion(statement.body, out, indent + 1, depth + 1)
+                    out.safeAppend("${indentStr}}\n")
+                }
+                is ForInStatement -> {
+                    out.safeAppend("${indentStr}for (const ${generateRegId(statement.keyReg)} in ${generateExpression(statement.obj)}) {\n")
+                    generateRegion(statement.body, out, indent + 1, depth + 1)
+                    out.safeAppend("${indentStr}}\n")
+                }
                 else -> {
                     out.safeAppend("${indentStr}// unknown statement type\n")
                 }
             }
+        }
+    }
+
+    /**
+     * 预扫描当前区域的语句，把 `iterator init + while` 模式替换为 for-of/for-in。
+     * 这样可以直接吞掉 init 的 LinearStatement，避免先生成再跳过。
+     */
+    private fun lowerIteratorLoops(statements: List<Decompilable>): List<Decompilable> {
+        val result = mutableListOf<Decompilable>()
+        var i = 0
+        while (i < statements.size) {
+            val stmt = statements[i]
+            val prev = result.lastOrNull() as? LinearStatement
+            if (stmt is WhileStatement && prev != null) {
+                val lowered = tryLowerIteratorLoop(stmt, prev, result.size - 1)
+                if (lowered != null) {
+                    result[result.size - 1] = lowered.statement
+                    i++
+                    continue
+                }
+            }
+            result.add(stmt)
+            i++
+        }
+        return result
+    }
+
+    /**
+     * 循环降层结果
+     */
+    private data class LoweredLoop(val statement: Decompilable, val skipPrevIndex: Int)
+
+    private data class IteratorInit(
+        val iterReg: FunSimCtx.RegId,
+        val iterable: IrOp.Expression,
+        val nextMethodReg: FunSimCtx.RegId? = null
+    )
+
+    private data class ForOfHeader(
+        val resultReg: FunSimCtx.RegId,
+        val nextCall: IrOp.Expression,
+        val doneCheck: IrOp.Expression,
+        val explicitLoopVar: FunSimCtx.RegId?
+    )
+
+    private data class ForInHeader(
+        val keyReg: FunSimCtx.RegId,
+        val doneCheck: IrOp.Expression
+    )
+
+    /**
+     * 尝试把 iterator while 循环降级为 for-of / for-in。
+     * 仅处理简单模式，失败时返回 null，调用方回退到普通 while。
+     */
+    private fun tryLowerIteratorLoop(
+        whileStmt: WhileStatement,
+        prev: LinearStatement,
+        prevIndex: Int
+    ): LoweredLoop? {
+        val initOps = rawOps(prev.block)
+        val init = findIteratorInit(initOps) ?: return null
+
+        val bodyStatements = whileStmt.body.statements
+        if (bodyStatements.isEmpty()) return null
+
+        // 收集循环头部连续的 LinearStatement，直到遇到 If 为止
+        val leadingOps = mutableListOf<IrOp>()
+        var ifIndex = -1
+        for (i in bodyStatements.indices) {
+            val stmt = bodyStatements[i]
+            if (stmt is LinearStatement) {
+                leadingOps.addAll(rawOps(stmt.block))
+            } else if (stmt is IfStatement) {
+                ifIndex = i
+                break
+            } else {
+                break
+            }
+        }
+        if (ifIndex < 0) return null
+        val ifStmt = bodyStatements[ifIndex] as IfStatement
+
+        // 优先尝试 for-in
+        findForInHeader(leadingOps, init)?.let { header ->
+            if (!breaksOnDone(ifStmt, header.doneCheck, leadingOps)) return null
+            val remaining = bodyStatements.subList(ifIndex + 1, bodyStatements.size)
+            val bodyRegion = Region("${whileStmt.body.name}_inbody", Region.RegionType.Linear)
+            bodyRegion.statements.addAll(remaining)
+            return LoweredLoop(ForInStatement(init.iterable, header.keyReg, bodyRegion), prevIndex)
+        }
+
+        // 再尝试 for-of
+        val ofHeader = findForOfHeader(leadingOps, init) ?: return null
+        if (!breaksOnDone(ifStmt, ofHeader.doneCheck, leadingOps)) return null
+
+        // 跳过显式的 value 提取语句
+        var nextIndex = ifIndex + 1
+        var loopVarReg = ofHeader.explicitLoopVar
+        while (nextIndex < bodyStatements.size) {
+            val stmt = bodyStatements[nextIndex] as? LinearStatement ?: break
+            val extracted = findValueExtraction(rawOps(stmt.block), ofHeader.resultReg)
+            if (extracted != null) {
+                loopVarReg = extracted
+                nextIndex++
+            } else break
+        }
+        val finalLoopVar = loopVarReg ?: ofHeader.resultReg
+        val remaining = bodyStatements.subList(nextIndex, bodyStatements.size)
+        val bodyRegion = Region("${whileStmt.body.name}_ofbody", Region.RegionType.Linear)
+        bodyRegion.statements.addAll(remaining)
+        return LoweredLoop(ForOfStatement(init.iterable, finalLoopVar, bodyRegion), prevIndex)
+    }
+
+    private fun rawOps(block: CodeSegment.BasicBlock): List<IrOp> {
+        return (block as? CodeSegment.Linear)?.toList()?.map { it.irOp } ?: emptyList()
+    }
+
+    private fun findIteratorInit(ops: List<IrOp>): IteratorInit? {
+        var iterReg: FunSimCtx.RegId? = null
+        var iterable: IrOp.Expression? = null
+        var nextMethodReg: FunSimCtx.RegId? = null
+        for ((index, op) in ops.withIndex()) {
+            if (op is IrOp.AssignReg) {
+                val src = unwrapAccChain(ops, op)
+                when (src) {
+                    is IrOp.UaExp.GetIterator -> {
+                        iterReg = op.left
+                        val srcOpIndex = ops.indexOfFirst { it is IrOp.AssignReg && it.left == FunSimCtx.RegId.ACC && it.right == src }
+                        iterable = resolveIteratorSource(ops, srcOpIndex, src.source)
+                    }
+                    is IrOp.UaExp.GetPropIterator -> {
+                        iterReg = op.left
+                        val srcOpIndex = ops.indexOfFirst { it is IrOp.AssignReg && it.left == FunSimCtx.RegId.ACC && it.right == src }
+                        iterable = resolveIteratorSource(ops, srcOpIndex, src.source)
+                    }
+                    is IrOp.ObjField.Name -> {
+                        if (src.name == "next" && iterReg != null && src.obj is IrOp.LoadReg) {
+                            val objReg = src.obj.regId
+                            // `iterator.next` 可能直接通过 iterator 寄存器加载，也可能在 getiterator 后通过 ACC 加载
+                            if (objReg == iterReg || objReg == FunSimCtx.RegId.ACC) {
+                                nextMethodReg = op.left
+                            }
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+        if (iterReg == null || iterable == null) return null
+        return IteratorInit(iterReg, iterable, nextMethodReg)
+    }
+
+    /**
+     * 若 getiterator/getpropiterator 的源是 ACC 或普通寄存器，则在当前 init 块内回溯赋值，
+     * 得到真正的可迭代对象表达式（如数组字面量、对象字面量或参数寄存器）。
+     */
+    private fun resolveIteratorSource(
+        ops: List<IrOp>,
+        opIndex: Int,
+        source: IrOp.Expression
+    ): IrOp.Expression {
+        return resolveLocalExpr(ops, opIndex, source, mutableSetOf())
+    }
+
+    private fun resolveLocalExpr(
+        ops: List<IrOp>,
+        endIndex: Int,
+        expr: IrOp.Expression,
+        visited: MutableSet<FunSimCtx.RegId>
+    ): IrOp.Expression {
+        if (expr is IrOp.LoadReg) {
+            val regId = expr.regId
+            if (regId == FunSimCtx.RegId.ACC) {
+                val prev = findPrecedingAccSource(ops, endIndex) ?: return expr
+                return resolveLocalExpr(ops, ops.indexOfFirst { it is IrOp.AssignReg && it.left == FunSimCtx.RegId.ACC && it.right == prev }.coerceAtLeast(0), prev, visited)
+            }
+            if (regId.isReg() && visited.add(regId)) {
+                val def = findRegDefinition(ops, endIndex, regId)
+                if (def != null) {
+                    val defIndex = ops.indexOfFirst { it is IrOp.AssignReg && it.left == regId && unwrapAccChain(ops, it) == def }.coerceAtLeast(0)
+                    return resolveLocalExpr(ops, defIndex, def, visited)
+                }
+            }
+        }
+        return expr
+    }
+
+    private fun findRegDefinition(
+        ops: List<IrOp>,
+        endIndex: Int,
+        regId: FunSimCtx.RegId
+    ): IrOp.Expression? {
+        for (i in (endIndex - 1) downTo 0) {
+            val op = ops[i]
+            if (op is IrOp.AssignReg && op.left == regId) {
+                return unwrapAccChain(ops, op)
+            }
+        }
+        return null
+    }
+
+    private fun findForInHeader(
+        ops: List<IrOp>,
+        init: IteratorInit
+    ): ForInHeader? {
+        var keyReg: FunSimCtx.RegId? = null
+        for (op in ops) {
+            if (op is IrOp.AssignReg) {
+                val src = unwrapAccChain(ops, op)
+                if (src is IrOp.UaExp.GetNextPropName && src.iteratorReg == init.iterReg) {
+                    keyReg = op.left
+                }
+            }
+        }
+        if (keyReg == null) return null
+        val doneCheck = IrOp.BiExp.Eq(IrOp.LoadReg(keyReg), IrOp.JustImm(JSValue.Undefined))
+        return ForInHeader(keyReg, doneCheck)
+    }
+
+    private fun findForOfHeader(
+        ops: List<IrOp>,
+        init: IteratorInit
+    ): ForOfHeader? {
+        var resultReg: FunSimCtx.RegId? = null
+        var nextCall: IrOp.Expression? = null
+        for ((index, op) in ops.withIndex()) {
+            if (op is IrOp.AssignReg && op.left != FunSimCtx.RegId.ACC) {
+                val src = unwrapAccChain(ops, op)
+                val srcIndex = ops.indexOfFirst { it is IrOp.AssignReg && it.left == FunSimCtx.RegId.ACC && it.right == src }
+                if (isNextCall(src, init, ops, srcIndex)) {
+                    resultReg = op.left
+                    nextCall = src
+                }
+            }
+        }
+        if (resultReg == null || nextCall == null) return null
+        // done 检查通常基于 iterator.next() 的结果对象（或结果寄存器）
+        val doneCheck = IrOp.UaExp.IsTrue(IrOp.ObjField.Name(nextCall, "done"))
+        // 部分编译器会直接把 value 提取到 loopVar，例如 v = result.value
+        val explicitLoopVar = findValueExtraction(ops, resultReg)
+        return ForOfHeader(resultReg, nextCall, doneCheck, explicitLoopVar)
+    }
+
+    private fun isNextCall(
+        expr: IrOp.Expression,
+        init: IteratorInit,
+        ops: List<IrOp>,
+        opIndex: Int
+    ): Boolean {
+        when (expr) {
+            is IrOp.CallAcc -> {
+                if (expr.args.isNotEmpty()) return false
+                if (expr.overrideThis != init.iterReg) return false
+                // callee  implicit in ACC; look backward for the method source
+                val calleeSrc = findPrecedingAccSource(ops, opIndex)
+                return calleeSrc is IrOp.LoadReg && calleeSrc.regId == init.nextMethodReg
+            }
+            is IrOp.CallWithTarget -> {
+                if (expr.args.isNotEmpty()) return false
+                if (expr.overrideThis != init.iterReg) return false
+                return isNextMethodTarget(expr.target, init)
+            }
+            else -> return false
+        }
+    }
+
+    private fun findPrecedingAccSource(ops: List<IrOp>, endIndex: Int): IrOp.Expression? {
+        for (i in (endIndex - 1) downTo 0) {
+            val op = ops[i]
+            if (op is IrOp.AssignReg && op.left == FunSimCtx.RegId.ACC) {
+                return op.right
+            }
+        }
+        return null
+    }
+
+    private fun isNextMethodTarget(target: IrOp.Expression, init: IteratorInit): Boolean {
+        if (target is IrOp.ObjField.Name &&
+            target.name == "next" &&
+            target.obj is IrOp.LoadReg &&
+            target.obj.regId == init.iterReg
+        ) return true
+        if (target is IrOp.LoadReg && target.regId == init.nextMethodReg) return true
+        return false
+    }
+
+    private fun findValueExtraction(
+        ops: List<IrOp>,
+        resultReg: FunSimCtx.RegId
+    ): FunSimCtx.RegId? {
+        for (op in ops) {
+            if (op is IrOp.AssignReg) {
+                val src = unwrapAccChain(ops, op)
+                if (src is IrOp.ObjField.Name &&
+                    src.name == "value" &&
+                    src.obj is IrOp.LoadReg &&
+                    src.obj.regId == resultReg
+                ) {
+                    return op.left
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * 判断该 if 语句是否会在“循环应当结束”时跳出循环。
+     * 支持两种形式：
+     * 1. 条件区域直接就是 doneCheck 表达式（或取反）。
+     * 2. 前面的 LinearStatement 先把 doneCheck 算到 ACC，if 再判断 ACC 是否为 0。
+     */
+    private fun breaksOnDone(
+        ifStmt: IfStatement,
+        doneCheck: IrOp.Expression,
+        leadingOps: List<IrOp>
+    ): Boolean {
+        val block = ifStmt.condition.block as? CodeSegment.InsCondition ?: return false
+        val cond = block.condition
+
+        // 直接条件：cond == doneCheck，则 then 分支必须退出
+        if (isEquivalentCondition(cond, doneCheck) && isExitRegion(ifStmt.thenBranch)) return true
+        // cond == !doneCheck，则 else 分支必须退出
+        if (isEquivalentCondition(cond, invertDoneExpr(doneCheck)) && isExitRegion(ifStmt.elseBranch)) return true
+
+        // ACC 中转形式：前面先把 doneCheck 算到 ACC，if 再判断 ACC 是否为 0
+        val effectiveAcc = resolveAccChain(leadingOps) ?: return false
+        val holdsDone = isEquivalentCondition(effectiveAcc, doneCheck) || isEquivalentCondition(effectiveAcc, invertDoneExpr(doneCheck))
+        if (!holdsDone) return false
+        if (cond is IrOp.BiExp.NEq &&
+            cond.l is IrOp.LoadReg && cond.l.regId == FunSimCtx.RegId.ACC &&
+            isZeroImm(cond.r)
+        ) {
+            return isExitRegion(ifStmt.thenBranch)
+        }
+        if (cond is IrOp.BiExp.Eq &&
+            cond.l is IrOp.LoadReg && cond.l.regId == FunSimCtx.RegId.ACC &&
+            isZeroImm(cond.r)
+        ) {
+            return isExitRegion(ifStmt.elseBranch)
+        }
+        return false
+    }
+
+    private fun isZeroImm(expr: IrOp.Expression): Boolean {
+        return expr is IrOp.JustImm && expr.value is JSValue.Number && expr.value.value.toInt() == 0
+    }
+
+    /**
+     * 把 leadingOps 中连续的 ACC 赋值链解析为最终表达式。
+     * 例如：ACC = iterator.next(); ACC = ACC.done; ACC = IsTrue(ACC)
+     *       -> IsTrue(ObjField.Name(iterator.next(), "done"))
+     */
+    private fun resolveAccChain(ops: List<IrOp>): IrOp.Expression? {
+        var accExpr: IrOp.Expression = IrOp.LoadReg(FunSimCtx.RegId.ACC)
+        var seen = false
+        for (op in ops) {
+            if (op is IrOp.AssignReg && op.left == FunSimCtx.RegId.ACC) {
+                seen = true
+                accExpr = substituteAcc(op.right, accExpr)
+            }
+        }
+        return if (seen && accExpr !is IrOp.LoadReg) accExpr else null
+    }
+
+    private fun substituteAcc(expr: IrOp.Expression, replacement: IrOp.Expression): IrOp.Expression {
+        if (expr is IrOp.LoadReg && expr.regId == FunSimCtx.RegId.ACC) return replacement
+        return when (expr) {
+            is IrOp.LoadReg -> expr
+            is IrOp.JustImm -> expr
+            is IrOp.UaExp.IsTrue -> IrOp.UaExp.IsTrue(substituteAcc(expr.source, replacement))
+            is IrOp.UaExp.IsFalse -> IrOp.UaExp.IsFalse(substituteAcc(expr.source, replacement))
+            is IrOp.ObjField.Name -> IrOp.ObjField.Name(substituteAcc(expr.obj, replacement), expr.name)
+            is IrOp.ObjField.Index -> IrOp.ObjField.Index(substituteAcc(expr.obj, replacement), expr.index)
+            is IrOp.BiExp.Eq -> IrOp.BiExp.Eq(substituteAcc(expr.l, replacement), substituteAcc(expr.r, replacement))
+            is IrOp.BiExp.NEq -> IrOp.BiExp.NEq(substituteAcc(expr.l, replacement), substituteAcc(expr.r, replacement))
+            is IrOp.BiExp.StrictEq -> IrOp.BiExp.StrictEq(substituteAcc(expr.l, replacement), substituteAcc(expr.r, replacement))
+            is IrOp.BiExp.StrictNEq -> IrOp.BiExp.StrictNEq(substituteAcc(expr.l, replacement), substituteAcc(expr.r, replacement))
+            is IrOp.CallAcc -> expr
+            is IrOp.CallWithTarget -> IrOp.CallWithTarget(substituteAcc(expr.target, replacement), expr.args, expr.overrideThis)
+            else -> expr
+        }
+    }
+
+    private fun isExitRegion(region: Region?): Boolean {
+        return region != null && region.type == Region.RegionType.Tail
+    }
+
+    /**
+     * 比较两个表达式是否语义等价，允许 X、IsTrue(X)、X==true、X===true 等变体。
+     */
+    private fun isEquivalentCondition(a: IrOp.Expression, b: IrOp.Expression): Boolean {
+        val na = normalizeTruthy(a)
+        val nb = normalizeTruthy(b)
+        return expressionsEquivalent(na, nb)
+    }
+
+    /**
+     * 把“真值判断”归一化为 IsTrue(subject)。
+     */
+    private fun normalizeTruthy(expr: IrOp.Expression): IrOp.Expression {
+        if (expr is IrOp.UaExp.IsTrue) return expr
+        if (expr is IrOp.BiExp.Eq || expr is IrOp.BiExp.StrictEq) {
+            val bi = expr as IrOp.BiExp
+            if (isTrueImm(bi.r) && expressionsEquivalent(bi.l, bi.l)) return IrOp.UaExp.IsTrue(bi.l)
+            if (isTrueImm(bi.l)) return IrOp.UaExp.IsTrue(bi.r)
+        }
+        if (expr is IrOp.BiExp.NEq || expr is IrOp.BiExp.StrictNEq) {
+            val bi = expr as IrOp.BiExp
+            if (isFalseImm(bi.r)) return IrOp.UaExp.IsTrue(bi.l)
+            if (isFalseImm(bi.l)) return IrOp.UaExp.IsTrue(bi.r)
+        }
+        return expr
+    }
+
+    private fun isTrueImm(expr: IrOp.Expression): Boolean {
+        return expr is IrOp.JustImm && expr.value == JSValue.True
+    }
+
+    private fun isFalseImm(expr: IrOp.Expression): Boolean {
+        return expr is IrOp.JustImm && expr.value == JSValue.False
+    }
+
+    private fun invertDoneExpr(expr: IrOp.Expression): IrOp.Expression {
+        return when (expr) {
+            is IrOp.UaExp.IsTrue -> IrOp.UaExp.IsFalse(expr.source)
+            is IrOp.UaExp.IsFalse -> IrOp.UaExp.IsTrue(expr.source)
+            is IrOp.BiExp.Eq -> IrOp.BiExp.NEq(expr.l, expr.r)
+            is IrOp.BiExp.NEq -> IrOp.BiExp.Eq(expr.l, expr.r)
+            is IrOp.BiExp.StrictEq -> IrOp.BiExp.StrictNEq(expr.l, expr.r)
+            is IrOp.BiExp.StrictNEq -> IrOp.BiExp.StrictEq(expr.l, expr.r)
+            else -> expr
+        }
+    }
+
+    /**
+     * 将可能经过 ACC 中转的赋值展开为最终右值。
+     * 例如：_acc_ = X; v = _acc_  ->  v = X
+     */
+    private fun unwrapAccChain(ops: List<IrOp>, op: IrOp.AssignReg): IrOp.Expression {
+        if (op.right !is IrOp.LoadReg || op.right.regId != FunSimCtx.RegId.ACC) return op.right
+        val idx = ops.indexOf(op)
+        for (i in (idx - 1) downTo 0) {
+            val prev = ops[i]
+            if (prev is IrOp.AssignReg && prev.left == FunSimCtx.RegId.ACC) {
+                return prev.right
+            }
+        }
+        return op.right
+    }
+
+    private fun expressionsEquivalent(a: IrOp.Expression, b: IrOp.Expression): Boolean {
+        if (a::class != b::class) return false
+        return when (a) {
+            is IrOp.LoadReg -> b is IrOp.LoadReg && a.regId == b.regId
+            is IrOp.JustImm -> b is IrOp.JustImm && a.value == b.value
+            is IrOp.UaExp.IsTrue -> b is IrOp.UaExp.IsTrue && expressionsEquivalent(a.source, b.source)
+            is IrOp.UaExp.IsFalse -> b is IrOp.UaExp.IsFalse && expressionsEquivalent(a.source, b.source)
+            is IrOp.ObjField.Name -> b is IrOp.ObjField.Name && a.name == b.name && expressionsEquivalent(a.obj, b.obj)
+            is IrOp.ObjField.Index -> b is IrOp.ObjField.Index && a.index == b.index && expressionsEquivalent(a.obj, b.obj)
+            is IrOp.BiExp.Eq -> b is IrOp.BiExp.Eq && expressionsEquivalent(a.l, b.l) && expressionsEquivalent(a.r, b.r)
+            is IrOp.BiExp.NEq -> b is IrOp.BiExp.NEq && expressionsEquivalent(a.l, b.l) && expressionsEquivalent(a.r, b.r)
+            is IrOp.BiExp.StrictEq -> b is IrOp.BiExp.StrictEq && expressionsEquivalent(a.l, b.l) && expressionsEquivalent(a.r, b.r)
+            is IrOp.BiExp.StrictNEq -> b is IrOp.BiExp.StrictNEq && expressionsEquivalent(a.l, b.l) && expressionsEquivalent(a.r, b.r)
+            is IrOp.CallAcc -> b is IrOp.CallAcc && a.args == b.args && a.overrideThis == b.overrideThis
+            is IrOp.CallWithTarget -> b is IrOp.CallWithTarget && expressionsEquivalent(a.target, b.target) && a.args == b.args && a.overrideThis == b.overrideThis
+            else -> false
         }
     }
 
@@ -528,6 +1007,7 @@ class StructuredToJs(
                     }
                     is IrOp.Await -> "_acc_ = await ${generateExpression(op.source)};"
                     is IrOp.SpreadIntoArray -> "${generateRegId(op.arrReg)}.push(...${generateExpression(op.source)});"
+                    is IrOp.CloseIterator -> "/* closeiterator */"
                 }
             }
         }
@@ -585,7 +1065,11 @@ class StructuredToJs(
             is IrOp.UaExp.ToNumber -> "Number(${generateExpression(exp.source)})"
             is IrOp.UaExp.ToNumeric -> "Number(${generateExpression(exp.source)})"
             is IrOp.UaExp.TypeOf -> "typeof(${generateExpression(exp.source)})"
-            is IrOp.UaExp.GetAsyncIterator -> "/* getAsyncIterator */ ${generateExpression(exp.source)}"
+            is IrOp.UaExp.GetAsyncIterator -> "${generateExpression(exp.source)}[Symbol.iterator]()"
+            is IrOp.UaExp.GetIterator -> "${generateExpression(exp.source)}[Symbol.iterator]()"
+            is IrOp.UaExp.GetPropIterator -> "Object.keys(${generateExpression(exp.source)})[Symbol.iterator]()"
+            is IrOp.UaExp.GetNextPropName -> "${generateRegId(exp.iteratorReg)}.next()"
+            is IrOp.UaExp.DeprecatedGetIteratorNext -> "${generateRegId(exp.iteratorReg)}.deprecatedNext(${generateRegId(exp.nextReg)})"
         }
     }
 

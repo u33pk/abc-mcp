@@ -316,6 +316,14 @@ _acc_ = AtkTsGlobal.print(_acc_);
     - `StructuredToJs` / `ToJs` 新增数组字面量与展开元素渲染
     - 新增 `ArraySpreadMergingPassTest` 单元测试、`StarrayspreadValidationTest` HAP 扫描验证
     - 在 `/home/orz/project/unitTest/hap` 样本中验证：58 个含 `starrayspread` 的方法全部成功反编译，其中 34 个生成 `[...x]` 字面量形式（24 个因数组对象无法在同一基本块追踪而降级为 `.push(...)`）
+18. **迭代器相关指令实现与 for-of/for-in 语法降级** ✅
+    - 实现 `getiterator`（0x67/0xab）、`getpropiterator`（0x66）、`getnextpropname`（0x36）、`closeiterator`（0x68/0xac）、`deprecated.getiteratornext`（0xfc 0x02）的 IR 映射
+    - 新增 `ForOfStatement` / `ForInStatement` 语句类型
+    - 在 `StructuredToJs` 中预扫描 `iterator init + while` 模式，将其降级为 `for (const x of iterable)` / `for (const k in obj)`；无法识别时回退到低层 `while` 并保留 `Symbol.iterator()` / `Object.keys()` 表达式
+    - 修复 `CodeSegment.genGraph` 对 `JumpIf` 前缀指令的拆分，避免迭代器循环头部的副作用语句被丢弃
+    - 修复 `RegionGraphBuilder.cleanUnreachableNodes` 迭代清理不可达节点，防止 for-of 中 cleanup 块导致结构化分析失败
+    - 新增 `IteratorOpcodeTest` 单元测试（es2abc 编译真实 JS 片段后反编译验证）
+    - 新增 `IteratorOpcodeValidationTest` HAP 扫描验证：对 `/home/orz/project/unitTest/hap` 抽样含迭代器 opcode 的方法反编译，确保不崩溃
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）
@@ -328,9 +336,9 @@ _acc_ = AtkTsGlobal.print(_acc_);
 
 | 类别 | 指令 | 命中 | 说明 |
 |------|------|------|------|
-| 其他 | `getiterator`/`throw.ifnotobject`/`callruntime.*` | 42 | 迭代器、并发任务 |
+| 其他 | `callruntime.*` | - | 并发任务相关运行时调用 |
 
-> 当前 `/home/orz/project/unitTest/hap/hish.20250704.hap` 扫描结果（HISH）：34 处未实现，涉及 4 个 opcode——`callruntime.notifyconcurrentresult`(14)、`throw.ifnotobject`(13)、`getiterator`(6)、`callruntime.supercallforwardallargs`(1)。
+> 当前 `/home/orz/project/unitTest/hap/hish.20250704.hap` 扫描结果（HISH）：`getiterator` 与 `throw.ifnotobject` 已实现，剩余未实现主要集中在 `callruntime.*` 系列（如 `callruntime.notifyconcurrentresult`、`callruntime.supercallforwardallargs` 等）。
 
 ### 未来工作
 

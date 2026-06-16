@@ -202,23 +202,19 @@ class RegionGraphBuilder(
     }
 
     /**
-     * 清理不可达节点
+     * 清理不可达节点（迭代到不动点，处理级联不可达）
      */
     private fun cleanUnreachableNodes() {
         val entryBlock = codeSegments.values.firstOrNull() ?: return
         val entryRegion = blockToRegion[entryBlock] ?: return
-        
-        // 找出所有不可达节点
-        val unreachable = mutableSetOf<Region>()
-        for (node in regionGraph.nodes) {
-            if (node != entryRegion && regionGraph.inDegree(node) == 0) {
-                unreachable.add(node)
+
+        do {
+            val unreachable = regionGraph.nodes.filter {
+                it != entryRegion && regionGraph.inDegree(it) == 0
             }
-        }
-        
-        // 删除不可达节点
-        for (node in unreachable) {
-            regionGraph.removeNode(node)
-        }
+            for (node in unreachable) {
+                regionGraph.removeNode(node)
+            }
+        } while (unreachable.isNotEmpty())
     }
 }

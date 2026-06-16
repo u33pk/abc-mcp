@@ -228,10 +228,21 @@ sealed interface CodeSegment{
                 } else if(ope is IrOp.Throw){
                     codeSegmentMap[curr.codeOffset] = Throw(curr)
                 } else if(ope is IrOp.JumpIf) {
-                    assert(curr.nextOffset == nxt!!.codeOffset)
-                    codeSegmentMap[curr.codeOffset] = InsCondition(
-                        curr, ope.condition, curr.codeOffset + ope.offset
-                    )
+                    val len = (nxt?.index ?: asm.list.size) - curr.index
+                    if (len > 1) {
+                        // 条件跳转节点包含前缀语句时，拆分为 Linear + InsCondition，避免前缀被丢弃
+                        val jmpItem = asm.list[curr.index + len - 1]
+                        val jmpOp = jmpItem.irOp as IrOp.JumpIf
+                        codeSegmentMap[curr.codeOffset] = Linear(curr, len - 1, jmpItem.codeOffset)
+                        codeSegmentMap[jmpItem.codeOffset] = InsCondition(
+                            jmpItem, jmpOp.condition, jmpItem.codeOffset + jmpOp.offset
+                        )
+                    } else {
+                        assert(curr.nextOffset == nxt!!.codeOffset)
+                        codeSegmentMap[curr.codeOffset] = InsCondition(
+                            curr, ope.condition, curr.codeOffset + ope.offset
+                        )
+                    }
                 } else if(ope is IrOp.Jump){
 //                    val len = (nxt?.index ?: asm.list.size) - curr.index
 //                    assert(len == 1)

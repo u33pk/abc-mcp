@@ -81,5 +81,12 @@ fun IrOp.Expression.replaceReg(reg: FunSimCtx.RegId, replaceTo: FunSimCtx.RegId)
         is IrOp.UaExp.ToNumeric -> IrOp.UaExp.ToNumeric(source.replaceReg(reg, replaceTo))
         is IrOp.UaExp.TypeOf -> IrOp.UaExp.TypeOf(source.replaceReg(reg, replaceTo))
         is IrOp.UaExp.GetAsyncIterator -> IrOp.UaExp.GetAsyncIterator(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.GetIterator -> IrOp.UaExp.GetIterator(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.GetPropIterator -> IrOp.UaExp.GetPropIterator(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.GetNextPropName -> if (iteratorReg == reg) IrOp.UaExp.GetNextPropName(replaceTo) else this
+        is IrOp.UaExp.DeprecatedGetIteratorNext -> IrOp.UaExp.DeprecatedGetIteratorNext(
+            if (iteratorReg == reg) replaceTo else iteratorReg,
+            if (nextReg == reg) replaceTo else nextReg
+        )
     }
 }

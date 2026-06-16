@@ -69,6 +69,7 @@ class ToJs(val asm: Asm) {
                     is IrOp.AssignModuleVar -> "${op.local.localName ?: "moduleSlot"} = ${toJS(op.right)};"
                     is IrOp.Await -> "_acc_ = await ${toJS(op.source)};"
                     is IrOp.SpreadIntoArray -> "${toJS(op.arrReg)}.push(...${toJS(op.source)});"
+                    is IrOp.CloseIterator -> "/* closeiterator */"
                 }
             }
 
@@ -124,7 +125,11 @@ class ToJs(val asm: Asm) {
             is IrOp.UaExp.ToNumber -> "ToNumber(${toJS(exp.source)})"
             is IrOp.UaExp.ToNumeric -> "ToNumeric(${toJS(exp.source)})"
             is IrOp.UaExp.TypeOf -> "typeof(${toJS(exp.source)})"
-            is IrOp.UaExp.GetAsyncIterator -> "/* getAsyncIterator */ ${toJS(exp.source)}"
+            is IrOp.UaExp.GetAsyncIterator -> "${toJS(exp.source)}[Symbol.iterator]()"
+            is IrOp.UaExp.GetIterator -> "${toJS(exp.source)}[Symbol.iterator]()"
+            is IrOp.UaExp.GetPropIterator -> "Object.keys(${toJS(exp.source)})[Symbol.iterator]()"
+            is IrOp.UaExp.GetNextPropName -> "${toJS(exp.iteratorReg)}.next()"
+            is IrOp.UaExp.DeprecatedGetIteratorNext -> "${toJS(exp.iteratorReg)}.deprecatedNext(${toJS(exp.nextReg)})"
         }
     }
 

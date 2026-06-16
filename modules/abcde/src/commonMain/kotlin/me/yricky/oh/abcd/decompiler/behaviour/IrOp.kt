@@ -26,6 +26,11 @@ sealed interface IrOp {
                     0xfc.toByte() -> when(opCode){
                         // deprecated.poplexenv：与 poplexenv 语义相同，弹出当前词法环境
                         0x01.toByte() -> PopLexEnv
+                        // deprecated.getiteratornext v1, v2：旧版同步迭代器 next
+                        0x02.toByte() -> UaExp.DeprecatedGetIteratorNext(
+                            regId(item.opUnits[2].toUnsignedInt()),
+                            regId(item.opUnits[3].toUnsignedInt())
+                        ).st2Acc()
                         else -> Deprecated
                     }
                     0xfd.toByte() -> when(opCode){
@@ -86,6 +91,8 @@ sealed interface IrOp {
                         0x02.toByte() -> Throw.Error("patternnoncoercible")
                         0x03.toByte() -> Throw.Error("deletesuperproperty")
                         0x04.toByte() -> Throw.Error("constassignment", "${item.ins.format[2]}")
+                        // throw.ifnotobject：for-of 中校验 next 结果为对象，运行时检查，按 NOP 处理
+                        0x05.toByte() -> NOP
 
                         // throw.ifsupernotcorrectcall：方舟编译器在 super() / super.method() 调用前插入的运行时校验。
                         // 正常代码不会触发，无对应 TS/ArkTS 语法，按编译器 bookkeeping 处理为 NOP，避免污染反编译输出。
@@ -237,6 +244,14 @@ sealed interface IrOp {
                 0x63.toByte() -> AssignReg(LoadReg.ACC, JustImm(JSValue.Number(Double.fromBits(item.opUnits[1] as Long))))
                 0x64.toByte() -> Return.ReturnAcc
                 0x65.toByte() -> Return.ReturnUndefined
+
+                // iterator instructions
+                0x36.toByte() -> UaExp.GetNextPropName(regId(item.opUnits[1].toUnsignedInt())).st2Acc()
+                0x66.toByte() -> UaExp.GetPropIterator(LoadReg.acc).st2Acc()
+                0x67.toByte() -> UaExp.GetIterator(LoadReg.acc).st2Acc()
+                0x68.toByte() -> CloseIterator(regId(item.opUnits[2].toUnsignedInt()))
+                0xab.toByte() -> UaExp.GetIterator(LoadReg.acc).st2Acc()
+                0xac.toByte() -> CloseIterator(regId(item.opUnits[2].toUnsignedInt()))
 
                 0x69.toByte() -> PopLexEnv
 
@@ -495,6 +510,14 @@ sealed interface IrOp {
         override fun read(): Sequence<FunSimCtx.RegId> = sequenceOf(obj, prop, getter, setter)
     }
 
+    /**
+     * 关闭迭代器（closeiterator）
+     */
+    class CloseIterator(val iteratorReg: FunSimCtx.RegId) : Statement {
+        override fun read(): Sequence<FunSimCtx.RegId> = sequenceOf(iteratorReg)
+        override fun effected(): Sequence<FunSimCtx.RegId> = emptySequence()
+    }
+
     class Jump(val offset: Int): Statement
     class JumpIf(val offset: Int,val condition: Expression): Statement{
         override fun read(): Sequence<FunSimCtx.RegId> = condition.read()
@@ -631,6 +654,15 @@ sealed interface IrOp {
 
         class GetTemplateObject(source: Expression) : UaExp(source)
         class GetAsyncIterator(source: Expression) : UaExp(source)
+        class GetIterator(source: Expression) : UaExp(source)
+        class GetPropIterator(source: Expression) : UaExp(source)
+        class GetNextPropName(val iteratorReg: FunSimCtx.RegId) : UaExp(LoadReg(iteratorReg))
+        class DeprecatedGetIteratorNext(
+            val iteratorReg: FunSimCtx.RegId,
+            val nextReg: FunSimCtx.RegId
+        ) : UaExp(LoadReg(iteratorReg)) {
+            override fun read(): Sequence<FunSimCtx.RegId> = sequenceOf(iteratorReg, nextReg)
+        }
 
     }
 

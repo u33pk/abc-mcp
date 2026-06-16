@@ -1037,6 +1037,16 @@ object ExpressionPropagationPass : OptimizationPass {
                         is IrOp.UaExp.ToNumeric -> IrOp.UaExp.ToNumeric(newS)
                         is IrOp.UaExp.GetTemplateObject -> IrOp.UaExp.GetTemplateObject(newS)
                         is IrOp.UaExp.GetAsyncIterator -> IrOp.UaExp.GetAsyncIterator(newS)
+                        is IrOp.UaExp.GetIterator -> IrOp.UaExp.GetIterator(newS)
+                        is IrOp.UaExp.GetPropIterator -> IrOp.UaExp.GetPropIterator(newS)
+                        is IrOp.UaExp.GetNextPropName -> {
+                            val newReg = (newS as? IrOp.LoadReg)?.regId ?: expr.iteratorReg
+                            IrOp.UaExp.GetNextPropName(newReg)
+                        }
+                        is IrOp.UaExp.DeprecatedGetIteratorNext -> {
+                            val newReg = (newS as? IrOp.LoadReg)?.regId ?: expr.iteratorReg
+                            IrOp.UaExp.DeprecatedGetIteratorNext(newReg, expr.nextReg)
+                        }
                     }
                 } else expr
             }
