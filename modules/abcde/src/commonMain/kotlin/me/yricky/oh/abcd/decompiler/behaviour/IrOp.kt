@@ -300,7 +300,13 @@ sealed interface IrOp {
 
                 0xad.toByte() -> JSValue.Symbol.SymbolObj.just().st2Acc()
 
+                // async / generator 状态机相关指令
+                0xae.toByte() -> AsyncFunctionEnter            // asyncfunctionenter
                 0xb0.toByte() -> Debugger
+                0xb1.toByte() -> NOP                           // creategeneratorobj
+                0xb7.toByte() -> NOP                           // createasyncgeneratorobj
+                0xb8.toByte() -> NOP                           // asyncgeneratorresolve
+                0x97.toByte() -> NOP                           // asyncgeneratorreject
 
                 // supercallarrowrange: arrow 函数的 super 调用
                 //   opUnits[1] = this reg, opUnits[2] = arg count, opUnits[3] = first arg reg
@@ -318,6 +324,16 @@ sealed interface IrOp {
 
                 0xc1.toByte() -> UaExp.GetTemplateObject(LoadReg.acc).st2Acc()
                 0xc2.toByte() -> DeleteProp(regId(item.opUnits[1]), FunSimCtx.RegId.ACC)
+
+                // async / generator 状态机相关指令
+                0xbf.toByte() -> NOP                                              // resumegenerator
+                0xc0.toByte() -> JSValue.Number(0).just().st2Acc()                // getresumemode -> 0，让正常 resume 分支生效
+                0xc3.toByte() -> NOP                                              // suspendgenerator
+                0xc4.toByte() -> Await(LoadReg.acc)                            // asyncfunctionawaituncaught
+                0xcd.toByte() -> Return.ReturnAcc                                 // asyncfunctionresolve
+                0xce.toByte() -> Throw.Acc                                        // asyncfunctionreject
+                0xd6.toByte() -> NOP                                              // setgeneratorstate
+                0xd7.toByte() -> UaExp.GetAsyncIterator(LoadReg.acc).st2Acc()     // getasynciterator
 
                 0xc7.toByte() -> AssignObj(ObjField.Name(LoadReg.ACC, JSValue.PROTO), regId(item.opUnits[2]).ld())
                 0xc8.toByte() -> AssignObj(ObjField.Value(regId(item.opUnits[2]), regId(item.opUnits[3])), LoadReg.acc)
@@ -358,6 +374,7 @@ sealed interface IrOp {
 
     object NOP: TraitNOP
     object Debugger: TraitNOP
+    object AsyncFunctionEnter: TraitNOP // 标记当前函数为 async 函数
     object Disabled: IrOp //指令功能未使能，暂不可用。
     object Deprecated: IrOp
     class NewLex(val size:Int): IrOp
@@ -512,7 +529,17 @@ sealed interface IrOp {
         class IsFalse(source: Expression) : UaExp(source)
 
         class GetTemplateObject(source: Expression) : UaExp(source)
+        class GetAsyncIterator(source: Expression) : UaExp(source)
 
+    }
+
+    /**
+     * await 表达式语句。
+     * 单独作为 Statement 而不是 AssignReg，避免被死代码消除误删（await 有副作用）。
+     */
+    class Await(val source: Expression) : Statement {
+        override fun read(): Sequence<FunSimCtx.RegId> = source.read()
+        override fun effected(): Sequence<FunSimCtx.RegId> = sequenceOf(FunSimCtx.RegId.ACC)
     }
 
     /**

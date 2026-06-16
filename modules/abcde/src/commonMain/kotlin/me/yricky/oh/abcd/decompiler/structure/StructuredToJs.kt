@@ -2,6 +2,7 @@ package me.yricky.oh.abcd.decompiler.structure
 
 import me.yricky.oh.abcd.cfm.AbcMethod
 import me.yricky.oh.abcd.cfm.argsStr
+import me.yricky.oh.abcd.code.TryBlock
 import me.yricky.oh.abcd.decompiler.CodeSegment
 import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
@@ -11,6 +12,7 @@ import me.yricky.oh.abcd.decompiler.structure.statement.WhileStatement
 import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.abcd.isa.asmName
 import me.yricky.oh.abcd.literal.ModuleLiteralArray
+import me.yricky.oh.common.value
 
 /**
  * 解码方法名为可读格式
@@ -61,7 +63,10 @@ class OutputTooLargeException(
  * 基于结构化分析的代码生成器
  * 将 Region 树转换为 JavaScript/TypeScript 代码
  */
-class StructuredToJs(val asm: Asm) {
+class StructuredToJs(
+    val asm: Asm,
+    private val catchHandlers: List<RegionGraphBuilder.CatchHandlerInfo> = emptyList()
+) {
     companion object {
         /** 单个方法反编译输出的最大字符数（10 MB） */
         const val MAX_TOTAL_OUTPUT_SIZE = 10 * 1024 * 1024
@@ -104,10 +109,17 @@ class StructuredToJs(val asm: Asm) {
             val restIndex = asm.irOpList.mapNotNull { op ->
                 (op as? IrOp.AssignReg)?.right as? IrOp.CopyRestArgs
             }.firstOrNull()?.startIdx ?: -1
-            sb.safeAppend("function $methodName${asm.code.method.argsStr(restIndex)} {\n")
+            val isAsync = asm.irOpList.any { it is IrOp.AsyncFunctionEnter }
+            sb.safeAppend("${if (isAsync) "async " else ""}function $methodName${asm.code.method.argsStr(restIndex)} {\n")
+
+            // 在函数体顶部输出 try-catch 摘要，确保即使后续代码被截断或条件块未直接生成，LLM 也能看到完整的 try/catch 边界
+            generateTryCatchHeader(sb, 1)
 
             // 生成函数体（直接写入 sb，确保超出预算时保留尽可能多的部分输出）
             generateRegion(region, sb, 1)
+
+            // 生成 catch handler 注释块（catch handler 从主 CFG 剥离，单独输出）
+            generateCatchHandlers(sb, 1)
 
             // 生成函数尾
             sb.safeAppend("}")
@@ -137,6 +149,50 @@ class StructuredToJs(val asm: Asm) {
     }
 
     /**
+     * 结构化分析失败时的降级输出：按字节码偏移顺序依次输出主 CFG 中的基本块，
+     * 并附加 catch handler 注释。这样即使无法还原 if/while 结构，LLM 仍能看到 try/catch 边界。
+     */
+    fun generateFallback(blocks: List<CodeSegment.BasicBlock>): String {
+        val sb = StringBuilder()
+        return try {
+            val methodName = decodeMethodName(asm.code.method)
+            val restIndex = asm.irOpList.mapNotNull { op ->
+                (op as? IrOp.AssignReg)?.right as? IrOp.CopyRestArgs
+            }.firstOrNull()?.startIdx ?: -1
+            val isAsync = asm.irOpList.any { it is IrOp.AsyncFunctionEnter }
+            sb.safeAppend("${if (isAsync) "async " else ""}function $methodName${asm.code.method.argsStr(restIndex)} {\n")
+
+            // 在函数体顶部输出 try-catch 摘要
+            generateTryCatchHeader(sb, 1)
+
+            for (block in blocks.sortedBy { it.item.codeOffset }) {
+                generateLinearBlock(block, sb, 1)
+            }
+
+            generateCatchHandlers(sb, 1)
+            sb.safeAppend("}")
+
+            val importStr = imports.distinctBy { it.localName }.joinToString(separator = ";\n") { it.toString() }
+            val nsImportStr = nsImports.joinToString(separator = ";\n") { it.toString() }
+            val exportStr = exports.mapNotNull { exp ->
+                val local = exp.localName ?: return@mapNotNull null
+                val export = exp.exportName ?: return@mapNotNull null
+                if (local == export) "export { $local }" else "export { $local as $export }"
+            }.distinct().joinToString(separator = ";\n")
+
+            val header = listOfNotNull(
+                importStr.ifBlank { null },
+                nsImportStr.ifBlank { null },
+                exportStr.ifBlank { null }
+            ).joinToString(separator = ";\n")
+
+            if (header.isNotBlank()) "$header;\n\n$sb" else sb.toString()
+        } catch (e: OutputTooLargeException) {
+            throw OutputTooLargeException(e.generatedChars, sb.toString())
+        }
+    }
+
+    /**
      * 生成区域代码，直接追加到 [out]
      */
     private fun generateRegion(region: Region, out: StringBuilder, indent: Int, depth: Int = 0) {
@@ -149,6 +205,8 @@ class StructuredToJs(val asm: Asm) {
         for (statement in region.statements) {
             when (statement) {
                 is IfStatement -> {
+                    val activeTries = findConditionTryBlocks(statement.condition)
+                    emitTryAnnotations(activeTries, out, indent)
                     val condStr = generateCondition(statement.condition)
                     out.safeAppend("${indentStr}if ($condStr) {\n")
                     if (statement.thenBranch != null) {
@@ -159,8 +217,11 @@ class StructuredToJs(val asm: Asm) {
                         generateRegion(statement.elseBranch, out, indent + 1, depth + 1)
                     }
                     out.safeAppend("${indentStr}}\n")
+                    emitTryEndAnnotations(activeTries, out, indent)
                 }
                 is WhileStatement -> {
+                    val activeTries = statement.condition?.let { findConditionTryBlocks(it) } ?: emptyList()
+                    emitTryAnnotations(activeTries, out, indent)
                     if (statement.condition == null) {
                         out.safeAppend("${indentStr}while (true) {\n")
                     } else {
@@ -169,6 +230,7 @@ class StructuredToJs(val asm: Asm) {
                     }
                     generateRegion(statement.body, out, indent + 1, depth + 1)
                     out.safeAppend("${indentStr}}\n")
+                    emitTryEndAnnotations(activeTries, out, indent)
                 }
                 is DoWhileStatement -> {
                     out.safeAppend("${indentStr}do {\n")
@@ -182,6 +244,132 @@ class StructuredToJs(val asm: Asm) {
                     out.safeAppend("${indentStr}// unknown statement type\n")
                 }
             }
+        }
+    }
+
+    /**
+     * 获取指定基本块处于的 try 作用域列表（按起始地址升序，支持嵌套）
+     */
+    private fun activeTryBlocksForBlock(block: CodeSegment.BasicBlock?): List<TryBlock> {
+        val offset = block?.item?.codeOffset ?: return emptyList()
+        return asm.code.tryBlocks
+            .filter { it.startPc <= offset && offset < it.startPc + it.length }
+            .sortedBy { it.startPc }
+    }
+
+    private fun emitTryAnnotations(tryBlocks: List<TryBlock>, out: StringBuilder, indent: Int) {
+        val indentStr = "    ".repeat(indent)
+        for (tryBlock in tryBlocks) {
+            val start = tryBlock.startPc
+            val end = tryBlock.startPc + tryBlock.length
+            out.safeAppend("${indentStr}// try [0x${start.toString(16)},0x${end.toString(16)})\n")
+        }
+    }
+
+    private fun emitTryEndAnnotations(tryBlocks: List<TryBlock>, out: StringBuilder, indent: Int) {
+        val indentStr = "    ".repeat(indent)
+        for (tryBlock in tryBlocks.asReversed()) {
+            val start = tryBlock.startPc
+            val end = tryBlock.startPc + tryBlock.length
+            out.safeAppend("${indentStr}// end try [0x${start.toString(16)},0x${end.toString(16)})\n")
+        }
+    }
+
+    /**
+     * 从可能经过包装的条件 Region 中递归找出真正的 InsCondition 基本块，
+     * 并返回这些条件所处的 try 作用域并集。用于在 if/while 等语句前后补充 try 边界注释。
+     */
+    private fun findConditionTryBlocks(region: Region): List<TryBlock> {
+        val result = mutableSetOf<TryBlock>()
+        val visited = mutableSetOf<Region>()
+        fun dfs(r: Region) {
+            if (r in visited) return
+            visited.add(r)
+            val block = r.block
+            if (block is CodeSegment.InsCondition) {
+                result.addAll(activeTryBlocksForBlock(block))
+            }
+            for (stmt in r.statements) {
+                when (stmt) {
+                    is LinearStatement -> {
+                        if (stmt.block is CodeSegment.InsCondition) {
+                            result.addAll(activeTryBlocksForBlock(stmt.block))
+                        }
+                    }
+                    is IfStatement -> {
+                        stmt.thenBranch?.let { dfs(it) }
+                        stmt.elseBranch?.let { dfs(it) }
+                    }
+                    is WhileStatement -> stmt.body?.let { dfs(it) }
+                    is DoWhileStatement -> stmt.body?.let { dfs(it) }
+                    else -> { /* no-op */ }
+                }
+            }
+        }
+        dfs(region)
+        return result.sortedBy { it.startPc }
+    }
+
+    /**
+     * 在函数体顶部输出 try-catch 摘要。
+     * 这样即使后续代码被截断、结构化分析失败或 try 体只包含条件块，LLM 也能首先看到 try/catch 边界。
+     */
+    private fun generateTryCatchHeader(out: StringBuilder, indent: Int) {
+        if (asm.code.tryBlocks.isEmpty()) return
+        val indentStr = "    ".repeat(indent)
+        out.safeAppend("${indentStr}// try-catch summary:\n")
+        for (tryBlock in asm.code.tryBlocks) {
+            val start = tryBlock.startPc
+            val end = tryBlock.startPc + tryBlock.length
+            out.safeAppend("${indentStr}// try [0x${start.toString(16)},0x${end.toString(16)})\n")
+        }
+        generateCatchHandlerComments(out, indent)
+    }
+
+    /**
+     * 仅输出 catch handler 的注释行（不含 handler 代码）。
+     */
+    private fun generateCatchHandlerComments(out: StringBuilder, indent: Int) {
+        if (catchHandlers.isEmpty()) return
+        val indentStr = "    ".repeat(indent)
+        for ((region, tryBlock, catchBlock) in catchHandlers) {
+            val tryStart = tryBlock.startPc
+            val tryEnd = tryBlock.startPc + tryBlock.length
+            val handlerStart = catchBlock.handlerPc
+            val handlerEnd = catchBlock.handlerPc + catchBlock.codeSize
+            val catchType = resolveCatchType(catchBlock.typeIdx)
+            out.safeAppend("${indentStr}// catch handler for try [0x${tryStart.toString(16)},0x${tryEnd.toString(16)}) type=$catchType [0x${handlerStart.toString(16)},0x${handlerEnd.toString(16)})\n")
+        }
+    }
+
+    /**
+     * 生成 catch handler 注释块（含 handler 代码）。
+     * catch handler 只能由异常机制进入，因此从主 CFG 剥离后单独输出，避免干扰结构化分析。
+     */
+    private fun generateCatchHandlers(out: StringBuilder, indent: Int) {
+        if (catchHandlers.isEmpty()) return
+        val indentStr = "    ".repeat(indent)
+        out.safeAppend("${indentStr}// ---------- catch handlers (exception-driven entry) ----------\n")
+        for ((region, tryBlock, catchBlock) in catchHandlers) {
+            val tryStart = tryBlock.startPc
+            val tryEnd = tryBlock.startPc + tryBlock.length
+            val handlerStart = catchBlock.handlerPc
+            val handlerEnd = catchBlock.handlerPc + catchBlock.codeSize
+            val catchType = resolveCatchType(catchBlock.typeIdx)
+            out.safeAppend("${indentStr}// catch handler for try [0x${tryStart.toString(16)},0x${tryEnd.toString(16)}) type=$catchType [0x${handlerStart.toString(16)},0x${handlerEnd.toString(16)})\n")
+            generateLinearBlock(region.block!!, out, indent)
+            out.safeAppend("\n")
+        }
+    }
+
+    /**
+     * 将 catch 块中的 typeIdx 解析为可读的异常类型名，解析失败则回退显示索引值。
+     */
+    private fun resolveCatchType(typeIdx: Int): String {
+        return try {
+            asm.code.abc.stringItem(typeIdx).value.takeIf { it.isNotEmpty() } ?: "typeIdx=$typeIdx"
+        } catch (_: Exception) {
+            "typeIdx=$typeIdx"
         }
     }
 
@@ -217,9 +405,25 @@ class StructuredToJs(val asm: Asm) {
 
     /**
      * 生成线性基本块的代码，直接追加到 [out]
+     *
+     * 在每个线性块前后标注它处于哪些 try 作用域内。由于 CFG 已在 try/catch 边界处切分，
+     * 同一个块内的所有指令必然处于相同的 try 集合中，因此按块标注是准确且稳定的。
      */
     private fun generateLinearBlock(block: CodeSegment.BasicBlock, out: StringBuilder, indent: Int) {
         val indentStr = "    ".repeat(indent)
+        val blockOff = block.item.codeOffset
+
+        // 计算当前基本块处于哪些 try 范围内（支持嵌套）
+        val activeTryBlocks = asm.code.tryBlocks
+            .filter { it.startPc <= blockOff && blockOff < it.startPc + it.length }
+            .sortedBy { it.startPc }
+
+        // 打印 try 进入注释（外层先打印）
+        for (tryBlock in activeTryBlocks) {
+            val start = tryBlock.startPc
+            val end = tryBlock.startPc + tryBlock.length
+            out.safeAppend("${indentStr}// try [0x${start.toString(16)},0x${end.toString(16)})\n")
+        }
 
         when (block) {
             is CodeSegment.Linear -> {
@@ -243,6 +447,16 @@ class StructuredToJs(val asm: Asm) {
             is CodeSegment.InsCondition -> {
                 // 条件跳转，通常由 IfStatement 处理
             }
+            is CodeSegment.Throw -> {
+                out.safeAppend("$indentStr${generateIrOp(block.item.irOp)}\n")
+            }
+        }
+
+        // 打印 try 退出注释（内层先结束）
+        for (tryBlock in activeTryBlocks.asReversed()) {
+            val start = tryBlock.startPc
+            val end = tryBlock.startPc + tryBlock.length
+            out.safeAppend("${indentStr}// end try [0x${start.toString(16)},0x${end.toString(16)})\n")
         }
     }
 
@@ -255,6 +469,7 @@ class StructuredToJs(val asm: Asm) {
             IrOp.Deprecated -> "/* deprecated */"
             IrOp.Disabled -> "/* disabled */"
             IrOp.NOP -> ""
+            IrOp.AsyncFunctionEnter -> ""
             is IrOp.NewLex -> "/* newLex(${op.size}) */"
             is IrOp.UnImplemented -> "/* unimplemented: ${op.item.asmName} */"
             is IrOp.JustAnno -> "/* ${op.anno} */"
@@ -274,6 +489,7 @@ class StructuredToJs(val asm: Asm) {
                         exports.add(op.local)
                         "$name = ${generateExpression(op.right)};"
                     }
+                    is IrOp.Await -> "_acc_ = await ${generateExpression(op.source)};"
                 }
             }
         }
@@ -330,6 +546,7 @@ class StructuredToJs(val asm: Asm) {
             is IrOp.UaExp.ToNumber -> "Number(${generateExpression(exp.source)})"
             is IrOp.UaExp.ToNumeric -> "Number(${generateExpression(exp.source)})"
             is IrOp.UaExp.TypeOf -> "typeof(${generateExpression(exp.source)})"
+            is IrOp.UaExp.GetAsyncIterator -> "/* getAsyncIterator */ ${generateExpression(exp.source)}"
         }
     }
 

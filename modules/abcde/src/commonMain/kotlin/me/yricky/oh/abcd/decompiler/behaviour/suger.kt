@@ -80,5 +80,6 @@ fun IrOp.Expression.replaceReg(reg: FunSimCtx.RegId, replaceTo: FunSimCtx.RegId)
         is IrOp.UaExp.ToNumber -> IrOp.UaExp.ToNumber(source.replaceReg(reg, replaceTo))
         is IrOp.UaExp.ToNumeric -> IrOp.UaExp.ToNumeric(source.replaceReg(reg, replaceTo))
         is IrOp.UaExp.TypeOf -> IrOp.UaExp.TypeOf(source.replaceReg(reg, replaceTo))
+        is IrOp.UaExp.GetAsyncIterator -> IrOp.UaExp.GetAsyncIterator(source.replaceReg(reg, replaceTo))
     }
 }

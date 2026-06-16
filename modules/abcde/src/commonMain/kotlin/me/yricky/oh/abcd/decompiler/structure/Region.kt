@@ -1,5 +1,6 @@
 package me.yricky.oh.abcd.decompiler.structure
 
+import me.yricky.oh.abcd.code.TryBlock
 import me.yricky.oh.abcd.decompiler.CodeSegment
 
 /**
@@ -22,6 +23,16 @@ class Region(
     var isTryCatchHelperRegion: Boolean = false
     var isLogicalRegion: Boolean = false
     var isExceptionLandingPad: Boolean = false
+
+    /**
+     * 该区域处于哪些 try 作用域内（支持嵌套）。
+     */
+    val activeTryBlocks: MutableList<TryBlock> = mutableListOf()
+
+    /**
+     * 如果该区域是 catch handler，记录它所属的 TryBlock 与 CatchBlock。
+     */
+    var catchHandler: Pair<TryBlock, TryBlock.CatchBlock>? = null
 
     init {
         if (block != null) {
@@ -53,6 +64,8 @@ class Region(
         copy.isTryCatchHelperRegion = isTryCatchHelperRegion
         copy.isLogicalRegion = isLogicalRegion
         copy.isExceptionLandingPad = isExceptionLandingPad
+        copy.activeTryBlocks.addAll(activeTryBlocks)
+        copy.catchHandler = catchHandler
         return copy
     }
 

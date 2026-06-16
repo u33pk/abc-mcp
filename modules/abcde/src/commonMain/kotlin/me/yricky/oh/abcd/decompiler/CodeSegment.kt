@@ -1,5 +1,6 @@
 package me.yricky.oh.abcd.decompiler
 
+import me.yricky.oh.abcd.code.TryBlock
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
 import me.yricky.oh.abcd.isa.Asm
 
@@ -137,6 +138,14 @@ sealed interface CodeSegment{
         }
     }
 
+    class Throw(item: Asm.AsmItem):AsLinear(item, 1, item.nextOffset),BasicBlock{
+        override fun isTail(): Boolean = true
+
+        override fun toString(): String {
+            return "throw(0x${item.codeOffset.toString(16)},${item.index})"
+        }
+    }
+
 
     /**
      * 当满足条件的时候进行跳转
@@ -173,6 +182,9 @@ sealed interface CodeSegment{
                     item.next?.let { nxt ->
                         pcItemMap[nxt.codeOffset] = nxt
                     }
+                } else if(operation is IrOp.Throw){
+                    // throw 处的字节码是一个节点；其后继由异常处理表接管，普通 CFG 中不生成 fall-through 边
+                    pcItemMap[item.codeOffset] = item
                 } else if(operation is IrOp.Jump) {
                     //无条件跳转的目标位置显然是一个节点，无条件跳转的字节码的下一个位置若想被执行，一定是从其他地方跳转到这里，因此也是一个节点。但其本身的位置不应成为一个节点。
                     pcItemMap[item.codeOffset] = item
@@ -188,6 +200,19 @@ sealed interface CodeSegment{
                 }
             }
 
+            // 把 try/catch 边界也作为节点，使 try 体和 catch handler 成为独立基本块
+            asm.code.tryBlocks.forEach { tryBlock ->
+                fun addNodeAt(off: Int) {
+                    asm.list.firstOrNull { it.codeOffset == off }?.let { pcItemMap[off] = it }
+                }
+                addNodeAt(tryBlock.startPc)
+                addNodeAt(tryBlock.startPc + tryBlock.length)
+                tryBlock.catchBlocks.forEach { catch ->
+                    addNodeAt(catch.handlerPc)
+                    addNodeAt(catch.handlerPc + catch.codeSize)
+                }
+            }
+
             val sortedList = pcItemMap.values.sortedBy { it.codeOffset }
 
             /*
@@ -200,6 +225,8 @@ sealed interface CodeSegment{
                 val ope = curr.irOp
                 if(ope is IrOp.Return){
                     codeSegmentMap[curr.codeOffset] = Return(curr)
+                } else if(ope is IrOp.Throw){
+                    codeSegmentMap[curr.codeOffset] = Throw(curr)
                 } else if(ope is IrOp.JumpIf) {
                     assert(curr.nextOffset == nxt!!.codeOffset)
                     codeSegmentMap[curr.codeOffset] = InsCondition(
@@ -221,7 +248,10 @@ sealed interface CodeSegment{
 
         fun genLinear(asm: Asm):AsLinear{
             val codeSegmentMap = genGraph(asm)
-            return linearize(codeSegmentMap)
+            // catch handler 只能由异常机制进入，普通线性化无法处理，先过滤掉
+            val handlerStarts = asm.code.tryBlocks.flatMap { it.catchBlocks.map { cb -> cb.handlerPc } }.toSet()
+            val filteredMap = codeSegmentMap.filter { (off, _) -> off !in handlerStarts }
+            return linearize(filteredMap)
         }
 
         private fun linearize(codeSegments:Map<Int,CodeSegment>):AsLinear{

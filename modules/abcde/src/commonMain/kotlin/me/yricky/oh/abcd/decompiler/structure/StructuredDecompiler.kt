@@ -8,6 +8,7 @@ import me.yricky.oh.abcd.decompiler.behaviour.IrOp
 import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.abcd.isa.calledMethods
 import me.yricky.oh.abcd.isa.calledStrings
+import me.yricky.oh.common.value
 
 /**
  * 结构化反编译器统一入口
@@ -25,34 +26,38 @@ object StructuredDecompiler {
      */
     fun decompile(asm: Asm): String {
         return try {
-            // 1. 构建 CFG
+            // 1. 构建 CFG（try/catch 边界已作为独立基本块切分）
             val codeSegments = CodeSegment.genGraph(asm)
 
-            // 2. 构建 RegionGraph
-            val builder = RegionGraphBuilder(codeSegments)
-            val (regionGraph, entryRegion) = builder.build()
+            // 2. 构建 RegionGraph（catch handler 从主图剥离）
+            val builder = RegionGraphBuilder(codeSegments, asm.code.tryBlocks)
+            val buildResult = builder.build()
 
-            // 3. 执行结构化分析
+            // 3. 执行结构化分析（仅对主控制流图）
             val analysis = StructureAnalysis(
-                regionGraph = regionGraph,
-                entryRegion = entryRegion,
-                lastRegion = entryRegion // 简化处理
+                regionGraph = buildResult.graph,
+                entryRegion = buildResult.entry,
+                lastRegion = buildResult.entry // 简化处理
             )
             val structuredRegion = analysis.analyze()
 
-            // 4. 生成代码
-            generateCode(structuredRegion as Region, asm)
+            // 4. 生成代码（主图 + 单独标注的 catch handler）
+            generateCode(structuredRegion as Region, asm, buildResult.catchHandlers)
         } catch (e: OutputTooLargeException) {
             // 输出超出预算：返回部分代码 + 方法摘要，避免降级到线性反编译再次 OOM
             formatTruncatedOutput(asm, e)
         } catch (e: Exception) {
-            // 降级到旧的反编译器
+            // 结构化分析失败时，仍按基本块顺序输出，并保留 try/catch 标注
             return "// Structure analysis failed: ${e.message}\n" +
-                   "// Falling back to linear decompilation\n" +
+                   "// Falling back to linear block decompilation\n" +
                    try {
-                       ToJs(asm).toJS()
+                       val fallbackSegments = CodeSegment.genGraph(asm)
+                       val fallbackBuilder = RegionGraphBuilder(fallbackSegments, asm.code.tryBlocks)
+                       val fallbackResult = fallbackBuilder.build()
+                       val mainBlocks = fallbackResult.graph.nodes.mapNotNull { it.block }
+                       StructuredToJs(asm, fallbackResult.catchHandlers).generateFallback(mainBlocks)
                    } catch (e2: Exception) {
-                       "// Linear decompilation also failed: ${e2.message}"
+                       "// Linear block decompilation also failed: ${e2.message}"
                    }
         }
     }
@@ -63,20 +68,20 @@ object StructuredDecompiler {
     fun decompileWithInfo(asm: Asm): DecompileResult {
         return try {
             val codeSegments = CodeSegment.genGraph(asm)
-            val builder = RegionGraphBuilder(codeSegments)
-            val (regionGraph, entryRegion) = builder.build()
+            val builder = RegionGraphBuilder(codeSegments, asm.code.tryBlocks)
+            val buildResult = builder.build()
 
             val analysis = StructureAnalysis(
-                regionGraph = regionGraph,
-                entryRegion = entryRegion,
-                lastRegion = entryRegion
+                regionGraph = buildResult.graph,
+                entryRegion = buildResult.entry,
+                lastRegion = buildResult.entry
             )
             val structuredRegion = analysis.analyze()
 
             DecompileResult(
                 success = true,
-                code = generateCode(structuredRegion as Region, asm),
-                regionCount = regionGraph.nodes.size,
+                code = generateCode(structuredRegion as Region, asm, buildResult.catchHandlers),
+                regionCount = buildResult.graph.nodes.size,
                 method = "structured"
             )
         } catch (e: OutputTooLargeException) {
@@ -101,8 +106,12 @@ object StructuredDecompiler {
     /**
      * 从 Region 树生成代码
      */
-    private fun generateCode(region: Region, asm: Asm): String {
-        val generator = StructuredToJs(asm)
+    private fun generateCode(
+        region: Region,
+        asm: Asm,
+        catchHandlers: List<RegionGraphBuilder.CatchHandlerInfo> = emptyList()
+    ): String {
+        val generator = StructuredToJs(asm, catchHandlers)
         return generator.generate(region)
     }
 
@@ -120,6 +129,9 @@ object StructuredDecompiler {
             appendLine("//   basicBlocks: ${summary.basicBlockCount}")
             appendLine("//   vregs: ${summary.vregCount}")
             appendLine("//   hasTryCatch: ${summary.hasTryCatch}")
+            if (summary.hasTryCatch) {
+                appendLine("//   tryCatchSummary: ${summary.tryCatchSummary}")
+            }
             appendLine("//   hasRestArgs: ${summary.hasRestArgs}")
             appendLine("//   uniqueStrings: ${summary.uniqueStringCount}")
             appendLine("//   uniqueCalledMethods: ${summary.uniqueCalledMethodCount}")
@@ -162,6 +174,7 @@ object StructuredDecompiler {
         val basicBlockCount: Int,
         val vregCount: Int,
         val hasTryCatch: Boolean,
+        val tryCatchSummary: String,
         val hasRestArgs: Boolean,
         val uniqueStringCount: Int,
         val topStrings: List<String>,
@@ -194,6 +207,19 @@ object StructuredDecompiler {
                     .distinct()
                     .take(TOP_N)
 
+                val tryCatchSummary = asm.code.tryBlocks.joinToString("; ") { tryBlock ->
+                    val catches = tryBlock.catchBlocks.joinToString(", ") { catchBlock ->
+                        val catchType = try {
+                            asm.code.abc.stringItem(catchBlock.typeIdx).value
+                                .takeIf { it.isNotEmpty() } ?: "typeIdx=${catchBlock.typeIdx}"
+                        } catch (_: Exception) {
+                            "typeIdx=${catchBlock.typeIdx}"
+                        }
+                        "$catchType@[0x${catchBlock.handlerPc.toString(16)},0x${(catchBlock.handlerPc + catchBlock.codeSize).toString(16)})"
+                    }
+                    "try[0x${tryBlock.startPc.toString(16)},0x${(tryBlock.startPc + tryBlock.length).toString(16)}) -> $catches"
+                }
+
                 return MethodSummary(
                     decodedName = decodedName,
                     args = args,
@@ -201,6 +227,7 @@ object StructuredDecompiler {
                     basicBlockCount = basicBlockCount,
                     vregCount = asm.code.numVRegs,
                     hasTryCatch = asm.code.tryBlocks.isNotEmpty(),
+                    tryCatchSummary = tryCatchSummary,
                     hasRestArgs = asm.irOpList.any { op -> op is IrOp.AssignReg && op.right is IrOp.CopyRestArgs },
                     uniqueStringCount = uniqueStrings.size,
                     topStrings = topStrings,

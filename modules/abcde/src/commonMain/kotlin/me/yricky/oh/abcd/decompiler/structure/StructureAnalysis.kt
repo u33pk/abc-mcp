@@ -433,14 +433,16 @@ class StructureAnalysis(
     /**
      * 估算 Region 的大小（语句数），用于限制尾节点复制
      */
-    private fun estimateRegionSize(region: Region): Int {
+    private fun estimateRegionSize(region: Region, visited: MutableSet<Region> = mutableSetOf()): Int {
+        if (region in visited) return 0
+        visited.add(region)
         var size = region.statements.size
         for (stmt in region.statements) {
             size += when (stmt) {
-                is IfStatement -> estimateRegionSize(stmt.thenBranch ?: Region("", Region.RegionType.Linear)) +
-                        estimateRegionSize(stmt.elseBranch ?: Region("", Region.RegionType.Linear))
-                is WhileStatement -> estimateRegionSize(stmt.body)
-                is DoWhileStatement -> estimateRegionSize(stmt.body)
+                is IfStatement -> estimateRegionSize(stmt.thenBranch ?: Region("", Region.RegionType.Linear), visited) +
+                        estimateRegionSize(stmt.elseBranch ?: Region("", Region.RegionType.Linear), visited)
+                is WhileStatement -> estimateRegionSize(stmt.body, visited)
+                is DoWhileStatement -> estimateRegionSize(stmt.body, visited)
                 else -> 0
             }
         }

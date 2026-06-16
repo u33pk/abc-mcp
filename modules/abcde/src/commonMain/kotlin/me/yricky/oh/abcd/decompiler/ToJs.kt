@@ -22,7 +22,8 @@ class ToJs(val asm: Asm) {
         val sb = StringBuilder()
         val methodName = decodeMethodName(asm.code.method)
         val restIndex = asm.irOpList.filterIsInstance<IrOp.CopyRestArgs>().firstOrNull()?.startIdx ?: -1
-        sb.append("function ").append(methodName).append(asm.code.method.argsStr(restIndex)).append("{\n")
+        val isAsync = asm.irOpList.any { it is IrOp.AsyncFunctionEnter }
+        sb.append(if (isAsync) "async function " else "function ").append(methodName).append(asm.code.method.argsStr(restIndex)).append("{\n")
         sb.append(fc.toJS(CodeSegment.genLinear(asm),1))
         sb.append("}")
         return ("${fc.imports.joinToString(separator = ";\n") { it.toString() }}\n" +
@@ -36,6 +37,7 @@ class ToJs(val asm: Asm) {
             IrOp.Deprecated -> "/* deprecated */"
             IrOp.Disabled -> "/* disabled */"
             IrOp.NOP -> ""
+            IrOp.AsyncFunctionEnter -> ""
             is IrOp.NewLex -> "/* newLex(${op.size}) */"
             is IrOp.UnImplemented -> throw UnImplementedError(op.item)
             is IrOp.JustAnno -> "/* ${op.anno} */"
@@ -51,6 +53,7 @@ class ToJs(val asm: Asm) {
                     is IrOp.DeleteProp -> "delete ${toJS(op.obj)}[${toJS(op.prop)}];"
                     is IrOp.DefineGetterSetter -> "Object.defineProperty(${toJS(op.obj)}, ${toJS(op.prop)}, {get: ${toJS(op.getter)}, set: ${toJS(op.setter)}});"
                     is IrOp.AssignModuleVar -> "${op.local.localName ?: "moduleSlot"} = ${toJS(op.right)};"
+                    is IrOp.Await -> "_acc_ = await ${toJS(op.source)};"
                 }
             }
 
@@ -105,6 +108,7 @@ class ToJs(val asm: Asm) {
             is IrOp.UaExp.ToNumber -> "ToNumber(${toJS(exp.source)})"
             is IrOp.UaExp.ToNumeric -> "ToNumeric(${toJS(exp.source)})"
             is IrOp.UaExp.TypeOf -> "typeof(${toJS(exp.source)})"
+            is IrOp.UaExp.GetAsyncIterator -> "/* getAsyncIterator */ ${toJS(exp.source)}"
         }
     }
 
@@ -218,6 +222,7 @@ class ToJs(val asm: Asm) {
                 sb.toString()
             }
             is CodeSegment.Return -> "  ".repeat(indent) + toJS(linear.item.irOp) + "\n"
+            is CodeSegment.Throw -> "  ".repeat(indent) + toJS(linear.item.irOp) + "\n"
             is CodeSegment.WhilePattern -> {
                 val sb = StringBuilder()
                 sb.append("  ".repeat(indent)).append("while(${toJS(linear.condition.condition)}){\n")

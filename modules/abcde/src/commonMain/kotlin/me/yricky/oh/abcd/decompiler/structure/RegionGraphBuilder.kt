@@ -1,5 +1,6 @@
 package me.yricky.oh.abcd.decompiler.structure
 
+import me.yricky.oh.abcd.code.TryBlock
 import me.yricky.oh.abcd.decompiler.CodeSegment
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
 import me.yricky.oh.abcd.isa.Asm
@@ -7,34 +8,75 @@ import me.yricky.oh.abcd.isa.Asm
 /**
  * 区域图构建器
  * 将 ABCDE 的 CFG（CodeSegment.BasicBlock Map）转换为 RegionGraph<Region>
+ *
+ * 关键改造：把 catch handler 从主控制流图剥离。catch handler 只能由异常机制进入，
+ * 不是普通跳转目标，因此不加入主图，避免干扰 if/while 等结构化分析。
  */
 class RegionGraphBuilder(
-    private val codeSegments: Map<Int, CodeSegment.BasicBlock>
+    private val codeSegments: Map<Int, CodeSegment.BasicBlock>,
+    private val tryBlocks: List<TryBlock> = emptyList()
 ) {
+    data class CatchHandlerInfo(
+        val region: Region,
+        val tryBlock: TryBlock,
+        val catchBlock: TryBlock.CatchBlock
+    )
+
+    data class Result(
+        val graph: RegionGraph<Region>,
+        val entry: Region,
+        val catchHandlers: List<CatchHandlerInfo>
+    )
+
     private val regionGraph = RegionGraph<Region>()
     private val blockToRegion = mutableMapOf<CodeSegment.BasicBlock, Region>()
+    private val catchHandlers = mutableListOf<CatchHandlerInfo>()
     private var regionCounter = 0
 
     /**
      * 构建区域图
-     * @return Pair<RegionGraph, entryRegion>
+     * @return Result（主图、入口 Region、catch handler 列表）
      */
-    fun build(): Pair<RegionGraph<Region>, Region> {
+    fun build(): Result {
         // 1. 为每个 BasicBlock 创建对应的 Region
+        val handlerMap = tryBlocks
+            .flatMap { t -> t.catchBlocks.map { it.handlerPc to (t to it) } }
+            .toMap()
+
         for ((_, block) in codeSegments) {
             val regionType = determineRegionType(block)
             val region = Region("region_${regionCounter++}", regionType, block)
+
+            // 标记 catch handler：只能从异常机制进入，不加入主控制流图
+            handlerMap[block.item.codeOffset]?.let { (tryBlock, catchBlock) ->
+                region.catchHandler = tryBlock to catchBlock
+                catchHandlers.add(CatchHandlerInfo(region, tryBlock, catchBlock))
+            }
+
+            // 标记当前块处于哪些 try 范围内（catch handler 自身不算在 try 内）
+            if (region.catchHandler == null) {
+                val blockOff = block.item.codeOffset
+                tryBlocks.forEach { tryBlock ->
+                    if (tryBlock.startPc <= blockOff && blockOff < tryBlock.startPc + tryBlock.length) {
+                        region.activeTryBlocks.add(tryBlock)
+                    }
+                }
+                regionGraph.addNode(region)
+            }
+
             blockToRegion[block] = region
-            regionGraph.addNode(region)
         }
 
-        // 2. 建立边
+        // 2. 建立边（跳过 catch handler 作为源或目标）
         for ((_, block) in codeSegments) {
             val fromRegion = blockToRegion[block] ?: continue
+            if (fromRegion.catchHandler != null) continue
+
             val successors = getSuccessors(block)
-            
+
             for ((succBlock, edgeValue) in successors) {
                 val toRegion = blockToRegion[succBlock] ?: continue
+                if (toRegion.catchHandler != null) continue
                 regionGraph.putEdgeValue(fromRegion, toRegion, edgeValue)
             }
         }
@@ -43,12 +85,12 @@ class RegionGraphBuilder(
         cleanUnreachableNodes()
 
         // 4. 获取入口 Region
-        val entryBlock = codeSegments.values.firstOrNull() 
+        val entryBlock = codeSegments.values.firstOrNull()
             ?: throw IllegalStateException("No basic blocks found")
-        val entryRegion = blockToRegion[entryBlock] 
+        val entryRegion = blockToRegion[entryBlock]
             ?: throw IllegalStateException("Entry region not found")
 
-        return regionGraph to entryRegion
+        return Result(regionGraph, entryRegion, catchHandlers)
     }
 
     /**
@@ -58,6 +100,7 @@ class RegionGraphBuilder(
         return when (block) {
             is CodeSegment.InsCondition -> Region.RegionType.Condition
             is CodeSegment.Return -> Region.RegionType.Tail
+            is CodeSegment.Throw -> Region.RegionType.Tail
             is CodeSegment.JumpMark -> {
                 // 无条件跳转，检查是否是尾节点
                 val irOp = block.item.irOp
@@ -114,6 +157,9 @@ class RegionGraphBuilder(
             }
             is CodeSegment.Return -> {
                 // 返回：无后继
+            }
+            is CodeSegment.Throw -> {
+                // throw：无普通后继（异常处理由 try-catch 表接管）
             }
             is CodeSegment.Linear -> {
                 // 线性块：检查最后一条指令

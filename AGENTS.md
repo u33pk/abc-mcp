@@ -220,6 +220,21 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - 支持 `copyrestargs`（`0xcf`）和 `wide.copyrestargs`（前缀 `0xfd` + `0x0b`）
    - 函数签名中对 rest 参数标注 `...name`
    - ⚠️ 当前测试集（含 Kazumi HAP）中未找到使用 `copyrestargs` 指令的方法，尚未在真实数据中验证
+3. **try-catch 边界标注**
+   - `CodeSegment.genGraph()` 将 `tryBlock.startPc` / `startPc+length` / `catchBlock.handlerPc` / `handlerPc+codeSize` 作为 CFG 节点边界切分
+   - `RegionGraphBuilder` 把 catch handler 从主控制流图剥离，避免干扰 if/while 结构化分析
+   - `StructuredToJs` 在函数体顶部输出 try-catch 摘要，在每个线性基本块前后输出 `// try [...)` / `// end try [...)` 边界注释，并在函数末尾输出 `// catch handler ...` 注释块
+   - 结构化分析失败时，降级为按基本块顺序输出，并保留 try/catch 标注
+   - 超大方法截断输出时，`MethodSummary` 包含 `tryCatchSummary` 字段，展示 try 范围与 catch handler 范围
+   - 已在 `Melotopia-1.10.3_HiCar_unsigned.hap` 上验证：1274 个含 try-catch 的方法全部生成 try/catch 标注
+4. **async/await 反编译支持**
+   - `IrOp` 新增 `AsyncFunctionEnter`、`Await` 等 IR 节点
+   - 映射 `asyncfunctionenter` / `asyncfunctionawaituncaught` / `asyncfunctionresolve` / `asyncfunctionreject` / `suspendgenerator` / `resumegenerator` / `getresumemode` / `getasynciterator` 等指令
+   - 函数头自动输出 `async function ...`
+   - `await` 表达式渲染为 `_acc_ = await _acc_;`
+   - `getresumemode` 固定翻译为 `0`，让正常 resume 分支生效；`throw` 作为 CFG 终止点，避免状态机展开导致的重复代码
+   - 已在 `Melotopia-1.10.3_HiCar_unsigned.hap` 上验证：918 个 async 方法全部成功生成 `async function`，625 个含 await 指令的方法全部输出 `await` 关键字
+   - ⚠️ 当前实现乐观地将 `getresumemode` 翻译为常量 `0`，因此正常 resume 分支会保留，异常/完成 resume 分支虽被 `throw` 终止点剪枝，但仍可能在输出中留下形式上可达的死分支（例如 `_acc_ = false; if (!(_acc_ == 0)) { throw ... }`）。后续可添加常量分支剪枝 pass 进一步清理。
 
 ## 待完成任务
 
@@ -286,12 +301,13 @@ _acc_ = AtkTsGlobal.print(_acc_);
 - ✅ `open_hap` 资源解析异常处理：捕获 `Throwable`，避免不兼容 `resources.index` 导致 OOM 崩溃
 - ✅ `HapSignBlocks` 整数溢出修复：大 HAP 文件（>2GB 偏移）的签名块解析 `.toInt()` 溢出导致 `Range out of bounds` 错误，新增 Long 范围检查
 
-### 未实现指令（HISH 实测统计，共 15 种 2264 处）
+### 未实现指令（剩余主要类别，基于实现前快照）
+
+> async/await 与 generator 相关指令已实现，下表不再包含该类别。
 
 | 类别 | 指令 | 命中 | 说明 |
 |------|------|------|------|
 | super 类型检查 | `throw.ifsupernotcorrectcall` | 700 | super 调用前的类型验证 |
-| async/generator | `asyncfunctionresolve`/`awaituncaught`/`suspendgenerator`/`resumegenerator`/`getresumemode`/`asyncfunctionenter`/`asyncfunctionreject` | 1100 | async/await 和 generator 支持 |
 | 闭包 | `newlexenvwithname`/`poplexenv` | 197 | 词法环境创建/销毁 |
 | 其他 | `starrayspread`/`getiterator`/`throw.ifnotobject`/`callruntime.*` | 67 | 数组展开、迭代器、并发任务 |
 

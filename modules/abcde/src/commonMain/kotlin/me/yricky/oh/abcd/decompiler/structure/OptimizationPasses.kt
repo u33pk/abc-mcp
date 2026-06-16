@@ -1036,6 +1036,7 @@ object ExpressionPropagationPass : OptimizationPass {
                         is IrOp.UaExp.ToNumber -> IrOp.UaExp.ToNumber(newS)
                         is IrOp.UaExp.ToNumeric -> IrOp.UaExp.ToNumeric(newS)
                         is IrOp.UaExp.GetTemplateObject -> IrOp.UaExp.GetTemplateObject(newS)
+                        is IrOp.UaExp.GetAsyncIterator -> IrOp.UaExp.GetAsyncIterator(newS)
                     }
                 } else expr
             }
