@@ -10,7 +10,7 @@ import me.yricky.oh.abcd.decompiler.behaviour.JSValue
 import me.yricky.oh.abcd.decompiler.structure.*
 import me.yricky.oh.abcd.decompiler.structure.statement.*
 import me.yricky.oh.abcd.isa.Asm
-import me.yricky.oh.abcd.xref.ClassHierarchyIndex
+import me.yricky.oh.abcd.xref.ClassNameResolver
 
 /**
  * Class 重组 Pass。
@@ -180,7 +180,7 @@ object ClassReconstructionPass {
     ): String? {
         val allItems = newClassItem.asm.list
         val regMap = buildRegMap(allItems, newClassItem.index)
-        val resolved = ClassHierarchyIndex.resolveClassName(parentReg, regMap)
+        val resolved = ClassNameResolver.resolveClassName(parentReg, regMap)
         if (resolved != null) return resolved
 
         val abc = newClassItem.asm.code.method.clazz?.abc

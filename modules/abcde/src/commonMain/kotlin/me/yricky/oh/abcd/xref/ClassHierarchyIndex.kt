@@ -5,7 +5,6 @@ import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.abcd.cfm.ClassTag
 import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
-import me.yricky.oh.abcd.decompiler.behaviour.JSValue
 import me.yricky.oh.abcd.isa.Asm
 
 /**
@@ -118,7 +117,7 @@ class ClassHierarchyIndex private constructor(
                         val newClassExpr = (op as? IrOp.AssignReg)?.right as? IrOp.NewClass
                         if (newClassExpr != null) {
                             val childName = newClassExpr.constructor.method.clazz?.name ?: continue
-                            val parentName = resolveClassName(newClassExpr.parent, regMap)
+                            val parentName = ClassNameResolver.resolveClassName(newClassExpr.parent, regMap)
                             if (parentName != null
                                 && parentName != childName
                                 && parentName != "undefined"
@@ -166,33 +165,7 @@ class ClassHierarchyIndex private constructor(
             )
         }
 
-        /**
-         * 从寄存器出发，尝试解析出类名（与 XRefIndex 中逻辑一致）。
-         */
-        internal fun resolveClassName(
-            regId: FunSimCtx.RegId,
-            regMap: Map<FunSimCtx.RegId, IrOp.Expression>,
-            visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()
-        ): String? {
-            if (!visited.add(regId)) return null
-            return resolveClassName(regMap[regId], regMap, visited)
-        }
-
-        /**
-         * 从表达式出发，尝试解析出类名。
-         */
-        internal fun resolveClassName(
-            expr: IrOp.Expression?,
-            regMap: Map<FunSimCtx.RegId, IrOp.Expression>,
-            visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()
-        ): String? {
-            return when (expr) {
-                is IrOp.JustImm -> (expr.value as? JSValue.Function)?.method?.clazz?.name
-                is IrOp.LoadReg -> resolveClassName(expr.regId, regMap, visited)
-                is IrOp.LoadExternalModule -> expr.ext.localName
-                is IrOp.NewClass -> expr.constructor.method.clazz?.name
-                else -> null
-            }
-        }
+        // resolveClassName 已提取到 ClassNameResolver，此处直接调用
+        // （自动获得 LoadLocalModuleVar + resolveOhmUrl 支持）
     }
 }

@@ -115,7 +115,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 | `get_method_info` | 获取方法详情（参数名、行号、调试信息） |
 | `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
 | `get_xrefs_to_field` | 查找字段的读取者和写入者（交叉引用） |
-| `get_xrefs_to_class` | 查找类的实例化位置与 `instanceof` 检查位置（交叉引用） |
+| `get_xrefs_to_class` | 查找类的实例化位置、`instanceof` 检查位置与模块引用位置（交叉引用） |
 | `get_class_hierarchy` | 查询类的父类、接口、子类与接口实现者 |
 | `search_in_method` | 在方法体内按正则搜索反汇编文本，返回匹配行及上下文 |
 
@@ -257,7 +257,9 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - ✅ 类 `instanceof` 检查 xref 已实现：在 `XRefIndex` 中索引 `IrOp.BiExp.InstOf`，并在 `get_xrefs_to_class` 结果中展示
    - ✅ 类层次结构查询已实现：`ClassHierarchyIndex` + `get_class_hierarchy` 工具
    - ✅ 跨模块 xref 部分修复：OhmUrl 全限定类名解析 + 后缀规范化 + `&` 定界符清理
-   - ⚠️ ArkUI 组件引用未覆盖：组件通过函数调用（非 `NewInst`）引用，需额外索引 `LoadExternalModule` 使用位置
+   - ✅ 模块引用 xref 已实现：索引 `LoadExternalModule`/`LoadLocalModuleVar` 使用位置，覆盖 ArkUI 组件等通过函数调用引用的场景
+   - ✅ 类名解析统一：提取 `ClassNameResolver` 共享工具，`XRefIndex` 与 `ClassHierarchyIndex` 共用，消除逻辑分叉
+   - ✅ xref 工具统一类名查找：`get_xrefs_to_class`/`get_xrefs_to_method`/`get_class_hierarchy`/`search_in_method`/`get_method_info` 均使用 `findClassByName`，支持路径格式类名
    - 待扩展：类型标注引用（参数/变量类型标注）
 6. **优化反编译输出中的方法名显示** ✅
    - 已去掉 `TAG_NORMAL` 返回的 `function ` 前缀，解决 `function function [ANONYMOUS]` 问题
@@ -362,11 +364,15 @@ _acc_ = AtkTsGlobal.print(_acc_);
 24. **`search_strings` 方法名解码** ✅ — 输出中方法名从原始编码名改为解码后的可读名
 25. **ObjField 链式膨胀修复** ✅ — `expressionComplexity()` 对 `ObjField` 改为递归计算 `1 + complexity(obj)`，限制嵌套 4 层
 26. **删除 `decompile_class` 工具** ✅ — 与 `get_class_detail` 功能重叠，LLM 用 `get_class_detail` + `decompile_method` 工作流
-27. **跨模块 xref 修复（部分）** 🔄
-    - ✅ `resolveClassName` 对 `LoadExternalModule` 从 OhmUrl 提取全限定类名
+27. **跨模块 xref 完善** ✅
+    - ✅ `resolveClassName` 对 `LoadExternalModule` 从 OhmUrl 提取全限定类名（`@normalized:N&&&` 格式）
     - ✅ 新增 `LoadLocalModuleVar` 处理
     - ✅ 后缀规范化 + `&` 定界符清理
-    - ⚠️ ArkUI 组件通过函数调用（非 `NewInst`）引用，当前 XRef 无法捕获。需额外索引 `LoadExternalModule` 的使用位置
+    - ✅ 模块引用 xref：索引 `LoadExternalModule`/`LoadLocalModuleVar` 使用位置，覆盖 ArkUI 组件等函数调用引用场景
+    - ✅ 提取 `ClassNameResolver` 共享工具，`XRefIndex` 与 `ClassHierarchyIndex` 共用，消除逻辑分叉
+    - ✅ 所有 xref 相关工具统一使用 `findClassByName`，支持路径格式类名
+    - ✅ 修复测试路径：`CrossModuleXRefTest`/`XRefIndexTest` 改为本机路径，新增 `XRefModuleRefTest` 验证模块引用
+    - 待扩展：跨 ABC 文件 xref 聚合（多 ABC HAP）；类型标注引用
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）

@@ -50,7 +50,7 @@ class SearchInMethodTool(private val sessionManager: SessionManager) : Tool {
         val contextLines = args["context_lines"]?.jsonPrimitive?.intOrNull ?: 3
 
         val abc = sessionManager.getOrOpen(path)
-        val classItem = abc.classes.values.find { it.name == className }
+        val classItem = abc.findClassByName(className)
             ?: return "Error: Class not found: $className"
 
         if (classItem !is AbcClass) return "Error: $className is not a full class definition"

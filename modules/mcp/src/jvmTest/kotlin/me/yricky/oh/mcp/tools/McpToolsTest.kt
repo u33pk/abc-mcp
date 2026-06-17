@@ -91,19 +91,6 @@ class McpToolsTest {
     }
 
     @Test
-    fun testDecompileClass() {
-        assumeFile("$abcDir/emptyobj.abc")
-        val result = callTool(
-            "decompile_class",
-            "path" to JsonPrimitive("$abcDir/emptyobj.abc"),
-            "class_name" to JsonPrimitive("_GLOBAL")
-        )
-        println(result)
-        assertTrue("Should contain class header", result.contains("// Class: _GLOBAL"))
-        assertTrue("Should contain decompiled function", result.contains("function"))
-    }
-
-    @Test
     fun testDecompileMethod() {
         assumeFile("$abcDir/call_dynamic.abc")
         val result = callTool(

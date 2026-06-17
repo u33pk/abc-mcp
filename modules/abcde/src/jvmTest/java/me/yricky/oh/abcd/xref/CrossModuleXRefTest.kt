@@ -16,7 +16,7 @@ import java.nio.ByteOrder
  */
 class CrossModuleXRefTest {
 
-    private val abcFile = File("/home/orz/project/unitTest/hap/hish-unsigned_abc/ets/modules.abc")
+    private val abcFile = File("/Users/vv/project/unitTest/hap/yingshilian-HM_abc/ets/modules.abc")
 
     @Test
     fun testCrossModuleXrefs() {

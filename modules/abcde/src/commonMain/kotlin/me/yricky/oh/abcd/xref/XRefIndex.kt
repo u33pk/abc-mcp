@@ -5,7 +5,6 @@ import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.abcd.cfm.AbcMethod
 import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
-import me.yricky.oh.abcd.decompiler.behaviour.JSValue
 import me.yricky.oh.abcd.decompiler.structure.decodeMethodName
 import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.abcd.isa.calledMethods
@@ -36,6 +35,8 @@ class XRefIndex private constructor(
     val classInstantiations: Map<String, List<XRefLocation>>,
     /** 类名 -> 被 instanceof 检查的位置列表 */
     val classInstanceOfs: Map<String, List<XRefLocation>>,
+    /** 类名 -> 模块引用位置列表（LoadExternalModule / LoadLocalModuleVar 使用位置） */
+    val classModuleReferences: Map<String, List<XRefLocation>>,
 ) {
     /**
      * 查询方法的调用者（谁调用了这个方法）
@@ -76,14 +77,22 @@ class XRefIndex private constructor(
      * 查询类的实例化位置（谁在 new 这个类）
      */
     fun getInstantiations(className: String): List<XRefLocation> {
-        return classInstantiations[normalizeClassName(className)] ?: emptyList()
+        return classInstantiations[ClassNameResolver.normalizeClassName(className)] ?: emptyList()
     }
 
     /**
      * 查询类被 instanceof 检查的位置（谁在用 instanceof 判断这个类）
      */
     fun getInstanceOfs(className: String): List<XRefLocation> {
-        return classInstanceOfs[normalizeClassName(className)] ?: emptyList()
+        return classInstanceOfs[ClassNameResolver.normalizeClassName(className)] ?: emptyList()
+    }
+
+    /**
+     * 查询类的模块引用位置（谁在 LoadExternalModule / LoadLocalModuleVar 引用这个类）
+     * 涵盖 ArkUI 组件等通过函数调用引用的场景（不走 NewInst）。
+     */
+    fun getModuleReferences(className: String): List<XRefLocation> {
+        return classModuleReferences[ClassNameResolver.normalizeClassName(className)] ?: emptyList()
     }
 
     companion object {
@@ -98,6 +107,7 @@ class XRefIndex private constructor(
             val nameBasedWriters = mutableMapOf<String, MutableList<XRefLocation>>()
             val classInstantiations = mutableMapOf<String, MutableList<XRefLocation>>()
             val classInstanceOfs = mutableMapOf<String, MutableList<XRefLocation>>()
+            val classModuleRefs = mutableMapOf<String, MutableList<XRefLocation>>()
 
             for (classItem in abc.classes.values) {
                 if (classItem !is AbcClass) continue
@@ -165,6 +175,18 @@ class XRefIndex private constructor(
                             )
                             classInstanceOfs.getOrPut(instanceOfClass) { mutableListOf() }.add(loc)
                         }
+
+                        // 模块引用 xref（LoadExternalModule / LoadLocalModuleVar 使用位置）
+                        val moduleRefClasses = collectModuleReferences(item.irOp)
+                        for (refClass in moduleRefClasses) {
+                            val loc = XRefLocation(
+                                callerClass = classItem.name,
+                                callerMethod = method.name,
+                                callerDecodedName = decodeMethodName(method),
+                                codeOffset = item.codeOffset
+                            )
+                            classModuleRefs.getOrPut(refClass) { mutableListOf() }.add(loc)
+                        }
                     }
                 }
             }
@@ -174,10 +196,12 @@ class XRefIndex private constructor(
             val allClassNames = abc.classes.values.filterIsInstance<AbcClass>().map { it.name }.toSet()
             normalizeShortKeys(classInstantiations, allClassNames)
             normalizeShortKeys(classInstanceOfs, allClassNames)
+            normalizeShortKeys(classModuleRefs, allClassNames)
 
             // 去掉所有 key 中的 & 定界符（&entry/.../WebPage& → entry/.../WebPage）
             normalizeAmpersandKeys(classInstantiations)
             normalizeAmpersandKeys(classInstanceOfs)
+            normalizeAmpersandKeys(classModuleRefs)
 
             return XRefIndex(
                 methodCallers = callerMap.mapValues { it.value.toList() },
@@ -187,6 +211,7 @@ class XRefIndex private constructor(
                 nameBasedFieldWriters = nameBasedWriters.mapValues { it.value.toList() },
                 classInstantiations = classInstantiations.mapValues { it.value.toList() },
                 classInstanceOfs = classInstanceOfs.mapValues { it.value.toList() },
+                classModuleReferences = classModuleRefs.mapValues { it.value.toList() },
             )
         }
 
@@ -282,59 +307,7 @@ class XRefIndex private constructor(
             return map
         }
 
-        /**
-         * 从寄存器出发，尝试解析出类名。
-         */
-        private fun resolveClassName(
-            regId: FunSimCtx.RegId,
-            regMap: Map<FunSimCtx.RegId, IrOp.Expression>,
-            visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()
-        ): String? {
-            if (!visited.add(regId)) return null
-            return resolveClassName(regMap[regId], regMap, visited)
-        }
-
-        /**
-         * 从表达式出发，尝试解析出类名。
-         */
-        private fun resolveClassName(
-            expr: IrOp.Expression?,
-            regMap: Map<FunSimCtx.RegId, IrOp.Expression>,
-            visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()
-        ): String? {
-            return when (expr) {
-                is IrOp.JustImm -> (expr.value as? JSValue.Function)?.method?.clazz?.name
-                is IrOp.LoadReg -> resolveClassName(expr.regId, regMap, visited)
-                is IrOp.LoadExternalModule -> resolveOhmUrl(expr.ext.moduleRequest?.str) ?: expr.ext.localName
-                is IrOp.LoadLocalModuleVar -> expr.local.exportName
-                is IrOp.NewClass -> expr.constructor.method.clazz?.name
-                else -> null
-            }
-        }
-
-        /**
-         * 从 OhmUrl 中提取全限定类名。
-         * @normalized:N&&&entry/src/main/ets/pages/WebPage& → entry/src/main/ets/pages/WebPage
-         * 同时去掉 ABC 类名中的 & 定界符：&entry/.../WebPage& → entry/.../WebPage
-         */
-        private fun resolveOhmUrl(url: String?): String? {
-            if (url == null) return null
-            val prefix = me.yricky.oh.abcd.literal.OhmUrl.PREFIX_NORMALIZED_NOT_CROSS_HAP_FILE
-            if (url.startsWith(prefix)) {
-                return url.removePrefix(prefix).removeSuffix("&")
-            }
-            return null
-        }
-
-        /**
-         * 规范化类名：去掉 & 定界符
-         * &entry/src/main/ets/pages/WebPage& → entry/src/main/ets/pages/WebPage
-         */
-        private fun normalizeClassName(name: String): String {
-            return if (name.startsWith("&") && name.endsWith("&")) {
-                name.substring(1, name.length - 1)
-            } else name
-        }
+        // resolveClassName / resolveOhmUrl / normalizeClassName 已提取到 ClassNameResolver
 
         /**
          * 从一条 IR 指令中收集实例化的类名。
@@ -351,7 +324,7 @@ class XRefIndex private constructor(
                         expr.constructor.method.clazz?.name?.let { result.add(it) }
                     }
                     is IrOp.NewInst -> {
-                        resolveClassName(expr.clazz, regMap)?.let { result.add(it) }
+                        ClassNameResolver.resolveClassName(expr.clazz, regMap)?.let { result.add(it) }
                     }
                     is IrOp.BiExp -> {
                         visitExpr(expr.l)
@@ -399,7 +372,7 @@ class XRefIndex private constructor(
             fun visitExpr(expr: IrOp.Expression) {
                 when (expr) {
                     is IrOp.BiExp.InstOf -> {
-                        resolveClassName(expr.l, regMap)?.let { result.add(it) }
+                        ClassNameResolver.resolveClassName(expr.l, regMap)?.let { result.add(it) }
                         visitExpr(expr.r)
                     }
                     is IrOp.BiExp -> {
@@ -415,6 +388,58 @@ class XRefIndex private constructor(
                         visitExpr(IrOp.LoadReg(expr.value))
                     }
                     else -> { /* LoadReg, JustImm, NewClass, NewInst, CallAcc, DynamicImport 等不会直接产生 instanceof */ }
+                }
+            }
+
+            fun visitStmt(stmt: IrOp) {
+                when (stmt) {
+                    is IrOp.AssignReg -> visitExpr(stmt.right)
+                    is IrOp.AssignObj -> {
+                        visitExpr(stmt.left)
+                        visitExpr(stmt.right)
+                    }
+                    is IrOp.JumpIf -> visitExpr(stmt.condition)
+                    is IrOp.DeleteProp -> { /* 动态删除，不记录 */ }
+                    is IrOp.DefineGetterSetter -> { /* 动态 getter/setter，不记录 */ }
+                    else -> { /* NOP, Jump, Return, Throw, UnImplemented 等 */ }
+                }
+            }
+
+            visitStmt(irOp)
+            return result
+        }
+
+        /**
+         * 从一条 IR 指令中收集模块引用的类名（LoadExternalModule / LoadLocalModuleVar 使用位置）。
+         * 用于索引 ArkUI 组件等通过函数调用引用的场景（不走 NewInst）。
+         */
+        private fun collectModuleReferences(irOp: IrOp): List<String> {
+            val result = mutableListOf<String>()
+
+            fun visitExpr(expr: IrOp.Expression) {
+                when (expr) {
+                    is IrOp.LoadExternalModule -> {
+                        val resolved = ClassNameResolver.resolveOhmUrl(expr.ext.moduleRequest?.str)
+                            ?: expr.ext.localName
+                        if (resolved != null) result.add(resolved)
+                    }
+                    is IrOp.LoadLocalModuleVar -> {
+                        val name = expr.local.exportName
+                        if (name != null) result.add(name)
+                    }
+                    is IrOp.BiExp -> {
+                        visitExpr(expr.l)
+                        visitExpr(expr.r)
+                    }
+                    is IrOp.UaExp -> visitExpr(expr.source)
+                    is IrOp.CallWithTarget -> visitExpr(expr.target)
+                    is IrOp.ObjField.Name -> visitExpr(expr.obj)
+                    is IrOp.ObjField.Index -> visitExpr(expr.obj)
+                    is IrOp.ObjField.Value -> {
+                        visitExpr(expr.obj)
+                        visitExpr(IrOp.LoadReg(expr.value))
+                    }
+                    else -> { /* LoadReg, JustImm, NewClass, NewInst, CallAcc, DynamicImport 等不产生模块引用 */ }
                 }
             }
 

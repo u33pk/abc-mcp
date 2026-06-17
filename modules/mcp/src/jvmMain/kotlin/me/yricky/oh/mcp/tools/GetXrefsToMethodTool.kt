@@ -38,7 +38,7 @@ class GetXrefsToMethodTool(private val sessionManager: SessionManager) : Tool {
         val methodName = args["method_name"]?.jsonPrimitive?.content ?: return "Error: method_name is required"
 
         val abc = sessionManager.getOrOpen(path)
-        val classItem = abc.classes.values.find { it.name == className }
+        val classItem = abc.findClassByName(className)
             ?: return "Error: Class not found: $className"
 
         if (classItem !is AbcClass) return "Error: $className is not a full class definition"
