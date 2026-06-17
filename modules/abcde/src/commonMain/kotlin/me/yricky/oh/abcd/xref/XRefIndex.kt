@@ -169,6 +169,11 @@ class XRefIndex private constructor(
                 }
             }
 
+            // 后缀规范化：将短别名 key（如 "SimpleWebView"）映射为全限定名（如 "entry/.../SimpleWebView"）
+            val allClassNames = abc.classes.values.filterIsInstance<AbcClass>().map { it.name }.toSet()
+            normalizeShortKeys(classInstantiations, allClassNames)
+            normalizeShortKeys(classInstanceOfs, allClassNames)
+
             return XRefIndex(
                 methodCallers = callerMap.mapValues { it.value.toList() },
                 fieldReaders = fieldReaders.mapValues { it.value.toList() },
@@ -178,6 +183,24 @@ class XRefIndex private constructor(
                 classInstantiations = classInstantiations.mapValues { it.value.toList() },
                 classInstanceOfs = classInstanceOfs.mapValues { it.value.toList() },
             )
+        }
+
+        /**
+         * 将 map 中不含 "/" 的短别名 key 合并到唯一匹配的全限定名 key 下。
+         */
+        private fun normalizeShortKeys(
+            map: MutableMap<String, MutableList<XRefLocation>>,
+            allClassNames: Set<String>
+        ) {
+            val shortKeys = map.keys.filter { "/" !in it }.toList()
+            for (short in shortKeys) {
+                val candidates = allClassNames.filter { it.endsWith("/$short") }
+                if (candidates.size == 1) {
+                    val full = candidates.first()
+                    map.getOrPut(full) { mutableListOf() }.addAll(map.remove(short)!!)
+                }
+                // 多个候选或无候选时保留原 key，不做处理
+            }
         }
 
         /**
@@ -263,10 +286,24 @@ class XRefIndex private constructor(
             return when (expr) {
                 is IrOp.JustImm -> (expr.value as? JSValue.Function)?.method?.clazz?.name
                 is IrOp.LoadReg -> resolveClassName(expr.regId, regMap, visited)
-                is IrOp.LoadExternalModule -> expr.ext.localName
+                is IrOp.LoadExternalModule -> resolveOhmUrl(expr.ext.moduleRequest?.str) ?: expr.ext.localName
+                is IrOp.LoadLocalModuleVar -> expr.local.exportName
                 is IrOp.NewClass -> expr.constructor.method.clazz?.name
                 else -> null
             }
+        }
+
+        /**
+         * 从 OhmUrl 中提取全限定类名。
+         * @normalized:N&&&entry/src/main/ets/pages/WebPage& → entry/src/main/ets/pages/WebPage
+         */
+        private fun resolveOhmUrl(url: String?): String? {
+            if (url == null) return null
+            val prefix = me.yricky.oh.abcd.literal.OhmUrl.PREFIX_NORMALIZED_NOT_CROSS_HAP_FILE
+            if (url.startsWith(prefix)) {
+                return url.removePrefix(prefix).removeSuffix("&")
+            }
+            return null
         }
 
         /**
