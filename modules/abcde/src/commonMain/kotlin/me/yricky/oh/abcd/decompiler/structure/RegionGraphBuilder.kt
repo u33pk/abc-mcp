@@ -2,7 +2,9 @@ package me.yricky.oh.abcd.decompiler.structure
 
 import me.yricky.oh.abcd.code.TryBlock
 import me.yricky.oh.abcd.decompiler.CodeSegment
+import me.yricky.oh.abcd.decompiler.behaviour.FunSimCtx
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
+import me.yricky.oh.abcd.decompiler.behaviour.JSValue
 import me.yricky.oh.abcd.isa.Asm
 
 /**
@@ -81,7 +83,10 @@ class RegionGraphBuilder(
             }
         }
 
-        // 3. 清理不可达节点
+        // 3. 常量分支剪枝：对条件表达式做跨块常量求值，移除死边
+        pruneConstantBranches()
+
+        // 4. 清理不可达节点
         cleanUnreachableNodes()
 
         // 4. 获取入口 Region
@@ -199,6 +204,114 @@ class RegionGraphBuilder(
         }
         
         return result
+    }
+
+    /**
+     * 常量分支剪枝：对 Condition 类型的 Region，追踪前驱块的寄存器常量赋值，
+     * 代入条件表达式求值。若条件恒为 true/false，移除死边。
+     *
+     * 典型场景：getresumemode → _acc_ = 0; 后续 JumpIf(_acc_ != 0) 恒为 false，
+     * 剪枝后死分支不再进入结构化分析。
+     */
+    private fun pruneConstantBranches() {
+        for (region in regionGraph.nodes.toList()) {
+            val block = region.block
+            if (block !is CodeSegment.InsCondition) continue
+
+            // 1. 从前驱 Linear Block 建立寄存器 → 常量 映射
+            val constMap = mutableMapOf<Long, IrOp.Expression>()
+            for (pred in regionGraph.predecessors(region)) {
+                val predBlock = pred.block ?: continue
+                if (predBlock is CodeSegment.Linear) {
+                    for (item in predBlock.toList()) {
+                        val op = item.irOp
+                        if (op is IrOp.AssignReg && op.left != FunSimCtx.RegId.ACC &&
+                            AlgebraicSimplificationPass.isConstant(op.right)
+                        ) {
+                            constMap[op.left.value] = op.right
+                        }
+                        // 也追踪 ACC 的常量赋值
+                        if (op is IrOp.AssignReg && op.left == FunSimCtx.RegId.ACC &&
+                            AlgebraicSimplificationPass.isConstant(op.right)
+                        ) {
+                            constMap[FunSimCtx.RegId.ACC.value] = op.right
+                        }
+                    }
+                }
+            }
+
+            if (constMap.isEmpty()) continue
+
+            // 2. 将条件中的 LoadReg 替换为已知常量
+            val substituted = substituteConstants(block.condition, constMap)
+
+            // 3. 用 AlgebraicSimplificationPass 简化
+            val folded = AlgebraicSimplificationPass.simplify(substituted)
+
+            // 4. 若结果为常量，移除死边
+            val condValue = when {
+                folded is IrOp.JustImm && folded.value is JSValue.True -> true
+                folded is IrOp.JustImm && folded.value is JSValue.False -> false
+                folded is IrOp.JustImm && folded.value is JSValue.Number -> folded.value.value.toDouble() != 0.0
+                else -> continue  // 无法确定常量值，跳过
+            }
+
+            val successors = regionGraph.successorsWithValue(region)
+            for ((succ, edgeValue) in successors) {
+                val isLive = if (condValue) edgeValue else !edgeValue
+                if (!isLive) {
+                    regionGraph.removeEdge(region, succ)
+                }
+            }
+        }
+    }
+
+    /**
+     * 将表达式中的 LoadReg(reg) 替换为 constMap 中的已知常量
+     */
+    private fun substituteConstants(
+        expr: IrOp.Expression,
+        constMap: Map<Long, IrOp.Expression>
+    ): IrOp.Expression {
+        return when (expr) {
+            is IrOp.LoadReg -> constMap[expr.regId.value] ?: expr
+            is IrOp.BiExp.Eq -> IrOp.BiExp.Eq(
+                substituteConstants(expr.l, constMap),
+                substituteConstants(expr.r, constMap)
+            )
+            is IrOp.BiExp.NEq -> IrOp.BiExp.NEq(
+                substituteConstants(expr.l, constMap),
+                substituteConstants(expr.r, constMap)
+            )
+            is IrOp.BiExp.StrictEq -> IrOp.BiExp.StrictEq(
+                substituteConstants(expr.l, constMap),
+                substituteConstants(expr.r, constMap)
+            )
+            is IrOp.BiExp.StrictNEq -> IrOp.BiExp.StrictNEq(
+                substituteConstants(expr.l, constMap),
+                substituteConstants(expr.r, constMap)
+            )
+            is IrOp.BiExp.Less -> IrOp.BiExp.Less(
+                substituteConstants(expr.l, constMap),
+                substituteConstants(expr.r, constMap)
+            )
+            is IrOp.BiExp.LEq -> IrOp.BiExp.LEq(
+                substituteConstants(expr.l, constMap),
+                substituteConstants(expr.r, constMap)
+            )
+            is IrOp.BiExp.Ge -> IrOp.BiExp.Ge(
+                substituteConstants(expr.l, constMap),
+                substituteConstants(expr.r, constMap)
+            )
+            is IrOp.BiExp.GEq -> IrOp.BiExp.GEq(
+                substituteConstants(expr.l, constMap),
+                substituteConstants(expr.r, constMap)
+            )
+            is IrOp.UaExp.IsTrue -> IrOp.UaExp.IsTrue(substituteConstants(expr.source, constMap))
+            is IrOp.UaExp.IsFalse -> IrOp.UaExp.IsFalse(substituteConstants(expr.source, constMap))
+            is IrOp.UaExp.Not -> IrOp.UaExp.Not(substituteConstants(expr.source, constMap))
+            else -> expr
+        }
     }
 
     /**

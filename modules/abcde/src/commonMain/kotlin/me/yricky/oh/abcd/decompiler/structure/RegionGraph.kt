@@ -49,6 +49,13 @@ class RegionGraph<T> {
         return _successors[node]?.map { it.first }?.toSet() ?: emptySet()
     }
 
+    /**
+     * 获取后继节点及其边值
+     */
+    fun successorsWithValue(node: T): List<Pair<T, Boolean>> {
+        return _successors[node]?.toList() ?: emptyList()
+    }
+
     fun predecessors(node: T): Set<T> {
         return _predecessors[node]?.map { it.first }?.toSet() ?: emptySet()
     }

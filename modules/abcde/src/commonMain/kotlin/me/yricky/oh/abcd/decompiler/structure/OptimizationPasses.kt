@@ -31,6 +31,16 @@ object AlgebraicSimplificationPass : OptimizationPass {
         }
     }
 
+    /**
+     * 公开的表达式简化接口，供 RegionGraphBuilder 等外部调用
+     */
+    fun simplify(expr: IrOp.Expression): IrOp.Expression = simplifyExpression(expr)
+
+    /**
+     * 判断表达式是否是常量值
+     */
+    fun isConstant(expr: IrOp.Expression): Boolean = expr is IrOp.JustImm
+
     private fun simplifyExpression(expr: IrOp.Expression): IrOp.Expression {
         return when (expr) {
             is IrOp.BiExp.Add -> {

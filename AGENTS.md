@@ -235,7 +235,7 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - `await` 表达式渲染为 `_acc_ = await _acc_;`
    - `getresumemode` 固定翻译为 `0`，让正常 resume 分支生效；`throw` 作为 CFG 终止点，避免状态机展开导致的重复代码
    - 已在 `Melotopia-1.10.3_HiCar_unsigned.hap` 上验证：918 个 async 方法全部成功生成 `async function`，625 个含 await 指令的方法全部输出 `await` 关键字
-   - ⚠️ 当前实现乐观地将 `getresumemode` 翻译为常量 `0`，因此正常 resume 分支会保留，异常/完成 resume 分支虽被 `throw` 终止点剪枝，但仍可能在输出中留下形式上可达的死分支（例如 `_acc_ = false; if (!(_acc_ == 0)) { throw ... }`）。后续可添加常量分支剪枝 pass 进一步清理。
+   - ✅ 常量分支剪枝已实现：`RegionGraphBuilder.pruneConstantBranches()` 在结构化分析前追踪前驱块的寄存器常量赋值，代入条件求值，移除死边
 
 ## 待完成任务
 
