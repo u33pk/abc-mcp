@@ -1092,9 +1092,9 @@ object ExpressionPropagationPass : OptimizationPass {
             is IrOp.NoRegExpression -> 1
             is IrOp.LoadReg -> 1
             is IrOp.DynamicImport -> 1
-            is IrOp.ObjField.Name -> 2
-            is IrOp.ObjField.Index -> 2
-            is IrOp.ObjField.Value -> 2
+            is IrOp.ObjField.Name -> 1 + expressionComplexity(expr.obj)
+            is IrOp.ObjField.Index -> 1 + expressionComplexity(expr.obj)
+            is IrOp.ObjField.Value -> 1 + expressionComplexity(expr.obj)
             is IrOp.CallAcc -> 3 + expr.args.size
             is IrOp.CallWithTarget -> 3 + expressionComplexity(expr.target) + expr.args.size
             is IrOp.NewInst -> 3 + expr.constructorArgs.size
