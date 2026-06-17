@@ -76,14 +76,14 @@ class XRefIndex private constructor(
      * 查询类的实例化位置（谁在 new 这个类）
      */
     fun getInstantiations(className: String): List<XRefLocation> {
-        return classInstantiations[className] ?: emptyList()
+        return classInstantiations[normalizeClassName(className)] ?: emptyList()
     }
 
     /**
      * 查询类被 instanceof 检查的位置（谁在用 instanceof 判断这个类）
      */
     fun getInstanceOfs(className: String): List<XRefLocation> {
-        return classInstanceOfs[className] ?: emptyList()
+        return classInstanceOfs[normalizeClassName(className)] ?: emptyList()
     }
 
     companion object {
@@ -170,9 +170,14 @@ class XRefIndex private constructor(
             }
 
             // 后缀规范化：将短别名 key（如 "SimpleWebView"）映射为全限定名（如 "entry/.../SimpleWebView"）
+            // 同时去掉 key 中的 & 定界符
             val allClassNames = abc.classes.values.filterIsInstance<AbcClass>().map { it.name }.toSet()
             normalizeShortKeys(classInstantiations, allClassNames)
             normalizeShortKeys(classInstanceOfs, allClassNames)
+
+            // 去掉所有 key 中的 & 定界符（&entry/.../WebPage& → entry/.../WebPage）
+            normalizeAmpersandKeys(classInstantiations)
+            normalizeAmpersandKeys(classInstanceOfs)
 
             return XRefIndex(
                 methodCallers = callerMap.mapValues { it.value.toList() },
@@ -200,6 +205,20 @@ class XRefIndex private constructor(
                     map.getOrPut(full) { mutableListOf() }.addAll(map.remove(short)!!)
                 }
                 // 多个候选或无候选时保留原 key，不做处理
+            }
+        }
+
+        /**
+         * 去掉 map key 中的 & 定界符（&entry/.../WebPage& → entry/.../WebPage）
+         */
+        private fun normalizeAmpersandKeys(
+            map: MutableMap<String, MutableList<XRefLocation>>
+        ) {
+            val keysToFix = map.keys.filter { it.startsWith("&") && it.endsWith("&") }
+            for (key in keysToFix) {
+                val normalized = key.substring(1, key.length - 1)
+                val existing = map.remove(key)!!
+                map.getOrPut(normalized) { mutableListOf() }.addAll(existing)
             }
         }
 
@@ -296,6 +315,7 @@ class XRefIndex private constructor(
         /**
          * 从 OhmUrl 中提取全限定类名。
          * @normalized:N&&&entry/src/main/ets/pages/WebPage& → entry/src/main/ets/pages/WebPage
+         * 同时去掉 ABC 类名中的 & 定界符：&entry/.../WebPage& → entry/.../WebPage
          */
         private fun resolveOhmUrl(url: String?): String? {
             if (url == null) return null
@@ -304,6 +324,16 @@ class XRefIndex private constructor(
                 return url.removePrefix(prefix).removeSuffix("&")
             }
             return null
+        }
+
+        /**
+         * 规范化类名：去掉 & 定界符
+         * &entry/src/main/ets/pages/WebPage& → entry/src/main/ets/pages/WebPage
+         */
+        private fun normalizeClassName(name: String): String {
+            return if (name.startsWith("&") && name.endsWith("&")) {
+                name.substring(1, name.length - 1)
+            } else name
         }
 
         /**

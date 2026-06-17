@@ -109,7 +109,6 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 | `list_classes` | 列出所有类名，支持正则过滤 |
 | `get_class_detail` | 获取类详情（父类、字段、方法列表含字节码大小；func_main_0 中识别到重组 class 时会展示摘要） |
 | `reconstruct_class` | 从 func_main_0 中重组并输出指定 ArkTS/ETS class 的语法（含字段与方法签名，不展开方法体） |
-| `decompile_class` | 反编译指定类的所有方法（支持 `max_methods` 限制，默认 20） |
 | `decompile_method` | 反编译指定方法（支持 `offset`/`limit` 分页；超大方法自动返回摘要） |
 | `search_strings` | 搜索字符串常量（正则匹配） |
 | `disassemble_method` | 获取方法的字节码反汇编（支持 `offset`/`limit` 分页，默认 200 行） |
@@ -256,7 +255,9 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - ✅ 字段读写 xref 已实现：`get_xrefs_to_field` 工具，支持 `this.fieldName` 精确索引与同名字段兜底索引
    - ✅ 类实例化 xref 已实现：`get_xrefs_to_class` 工具，索引 `NewClass` 与 `NewInst`（后者采用方法级寄存器回溯启发式）
    - ✅ 类 `instanceof` 检查 xref 已实现：在 `XRefIndex` 中索引 `IrOp.BiExp.InstOf`，并在 `get_xrefs_to_class` 结果中展示
-   - ✅ 类层次结构查询已实现：`ClassHierarchyIndex` + `get_class_hierarchy` 工具，支持父类、接口、子类、接口实现者；对 ArkTS 编译的类还从 `NewClass` 指令的 parent 寄存器回溯 extends 关系，并将导入别名规范化为全限定类名
+   - ✅ 类层次结构查询已实现：`ClassHierarchyIndex` + `get_class_hierarchy` 工具
+   - ✅ 跨模块 xref 部分修复：OhmUrl 全限定类名解析 + 后缀规范化 + `&` 定界符清理
+   - ⚠️ ArkUI 组件引用未覆盖：组件通过函数调用（非 `NewInst`）引用，需额外索引 `LoadExternalModule` 使用位置
    - 待扩展：类型标注引用（参数/变量类型标注）
 6. **优化反编译输出中的方法名显示** ✅
    - 已去掉 `TAG_NORMAL` 返回的 `function ` 前缀，解决 `function function [ANONYMOUS]` 问题
@@ -345,10 +346,27 @@ _acc_ = AtkTsGlobal.print(_acc_);
     - 早期大小检测：指令数 > 1000 的方法直接返回摘要 + 反汇编片段，跳过完整反编译管线（避免 ~32MB 峰值内存）
     - 降低生成预算：`MAX_TOTAL_OUTPUT_SIZE` 从 10MB 降至 1MB
     - `decompile_method` 新增 `offset`/`limit` 分页参数
-    - `decompile_class` 新增 `max_methods`（默认 20）参数，防止类级输出撑爆上下文
+    - `decompile_method` 新增 `offset`/`limit` 分页参数
     - `disassemble_method` 新增 `offset`/`limit` 参数（默认 200 行），消除无限制输出
     - `get_class_detail` 方法列表新增字节码大小 `[N bytes]` 元数据
     - `MethodSummary.from()` 消除截断时的双重 `genGraph()` 调用
+22. **async 常量分支剪枝** ✅
+    - `RegionGraphBuilder.pruneConstantBranches()` 在结构化分析前追踪前驱块的寄存器常量代入条件求值，移除死边
+    - `getresumemode → 0` 后续 `JumpIf` 条件恒定时，死分支（throw/reject 路径）不再进入结构化分析输出
+    - `AlgebraicSimplificationPass` 暴露 `simplify()` / `isConstant()` 公开接口
+23. **反馈报告改进（4 项）** ✅
+    - 类名格式统一：新增 `ClassLookup.kt`，支持 `a/b/c/ClassName` 格式（自动加 `&` 匹配），4 个工具已适配
+    - try-catch 注释去重：`generateLinearBlock` 维护 `previousActiveTryBlocks`，仅在 try 集合变化时输出 delta
+    - `get_hap_manifest` 返回完整 `module.json` 原文 + 安全摘要
+    - 结构分析失败时 fallback 输出增加方法签名、指令数、top strings/methods
+24. **`search_strings` 方法名解码** ✅ — 输出中方法名从原始编码名改为解码后的可读名
+25. **ObjField 链式膨胀修复** ✅ — `expressionComplexity()` 对 `ObjField` 改为递归计算 `1 + complexity(obj)`，限制嵌套 4 层
+26. **删除 `decompile_class` 工具** ✅ — 与 `get_class_detail` 功能重叠，LLM 用 `get_class_detail` + `decompile_method` 工作流
+27. **跨模块 xref 修复（部分）** 🔄
+    - ✅ `resolveClassName` 对 `LoadExternalModule` 从 OhmUrl 提取全限定类名
+    - ✅ 新增 `LoadLocalModuleVar` 处理
+    - ✅ 后缀规范化 + `&` 定界符清理
+    - ⚠️ ArkUI 组件通过函数调用（非 `NewInst`）引用，当前 XRef 无法捕获。需额外索引 `LoadExternalModule` 的使用位置
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）
