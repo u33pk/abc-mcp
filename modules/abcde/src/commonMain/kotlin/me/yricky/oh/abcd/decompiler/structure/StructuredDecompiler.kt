@@ -63,10 +63,27 @@ object StructuredDecompiler {
             // 输出超出预算：返回部分代码 + 方法摘要，避免降级到线性反编译再次 OOM
             formatTruncatedOutput(asm, e, offset, limit)
         } catch (e: Exception) {
-            // 结构化分析失败时，仍按基本块顺序输出，并保留 try/catch 标注
-            val fallback = "// Structure analysis failed: ${e.message}\n" +
-                   "// Falling back to linear block decompilation\n" +
-                   try {
+            // 结构化分析失败时，输出方法摘要 + 线性块反编译
+            val method = asm.code.method
+            val decodedName = decodeMethodName(method)
+            val restIndex = asm.irOpList.filterIsInstance<IrOp.CopyRestArgs>().firstOrNull()?.startIdx ?: -1
+            val args = method.argsStr(restIndex)
+            val instructionCount = asm.list.size
+
+            val topStrings = asm.list.flatMap { it.calledStrings.asIterable() }
+                .distinct().sortedByDescending { it.length }.take(10)
+            val topMethods = asm.list.flatMap { it.calledMethods.asIterable() }
+                .distinct().map { "${it.clazz?.name ?: "?"}.${decodeMethodName(it)}" }.distinct().take(10)
+
+            val fallback = buildString {
+                appendLine("// [structure analysis failed: ${e.message}]")
+                appendLine("// Method: $decodedName($args)")
+                appendLine("// Instructions: $instructionCount")
+                if (topStrings.isNotEmpty()) appendLine("// Top strings: $topStrings")
+                if (topMethods.isNotEmpty()) appendLine("// Top called: $topMethods")
+                appendLine("// Falling back to linear block decompilation")
+                appendLine()
+                append(try {
                        val fallbackSegments = CodeSegment.genGraph(asm)
                        val fallbackBuilder = RegionGraphBuilder(fallbackSegments, asm.code.tryBlocks)
                        val fallbackResult = fallbackBuilder.build()
@@ -74,7 +91,8 @@ object StructuredDecompiler {
                        StructuredToJs(asm, fallbackResult.catchHandlers).generateFallback(mainBlocks)
                    } catch (e2: Exception) {
                        "// Linear block decompilation also failed: ${e2.message}"
-                   }
+                   })
+            }
             applyPagination(fallback, offset, limit)
         }
     }

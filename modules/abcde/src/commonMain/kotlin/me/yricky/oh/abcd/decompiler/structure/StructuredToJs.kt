@@ -77,6 +77,9 @@ class StructuredToJs(
     val asm: Asm,
     private val catchHandlers: List<RegionGraphBuilder.CatchHandlerInfo> = emptyList()
 ) {
+    /** 跟踪上一个基本块的活跃 try 集合，用于 try 注释去重 */
+    private var previousActiveTryBlocks: List<TryBlock> = emptyList()
+
     companion object {
         /** 单个方法反编译输出的最大字符数（10 MB） */
         const val MAX_TOTAL_OUTPUT_SIZE = 1 * 1024 * 1024  // 1 MB — 超出此预算的方法通过早期检测直接返回摘要
@@ -981,12 +984,24 @@ class StructuredToJs(
             .filter { it.startPc <= blockOff && blockOff < it.startPc + it.length }
             .sortedBy { it.startPc }
 
-        // 打印 try 进入注释（外层先打印）
-        for (tryBlock in activeTryBlocks) {
+        // try 注释去重：仅在 try 集合变化时输出 delta
+        val entered = activeTryBlocks.filter { it !in previousActiveTryBlocks }
+        val exited = previousActiveTryBlocks.filter { it !in activeTryBlocks }
+
+        // 先输出退出（内层先结束）
+        for (tryBlock in exited.asReversed()) {
+            val start = tryBlock.startPc
+            val end = tryBlock.startPc + tryBlock.length
+            out.safeAppend("${indentStr}// end try [0x${start.toString(16)},0x${end.toString(16)})\n")
+        }
+        // 再输出进入（外层先打印）
+        for (tryBlock in entered) {
             val start = tryBlock.startPc
             val end = tryBlock.startPc + tryBlock.length
             out.safeAppend("${indentStr}// try [0x${start.toString(16)},0x${end.toString(16)})\n")
         }
+
+        previousActiveTryBlocks = activeTryBlocks
 
         // 设置当前词法环境栈（单指令块直接使用该指令之前的栈）
         currentLexEnvStack = blockStartStack[block.item.codeOffset] ?: emptyList()
@@ -1034,13 +1049,6 @@ class StructuredToJs(
             is CodeSegment.Throw -> {
                 out.safeAppend("$indentStr${generateIrOp(block.item.irOp)}\n")
             }
-        }
-
-        // 打印 try 退出注释（内层先结束）
-        for (tryBlock in activeTryBlocks.asReversed()) {
-            val start = tryBlock.startPc
-            val end = tryBlock.startPc + tryBlock.length
-            out.safeAppend("${indentStr}// end try [0x${start.toString(16)},0x${end.toString(16)})\n")
         }
     }
 

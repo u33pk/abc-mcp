@@ -33,29 +33,25 @@ class GetHapManifestTool : Tool {
                 ?: return "Error: module.json not found in HAP"
 
             val content = zip.getInputStream(entry).reader().readText()
-            val config = json.decodeFromString<HapConfig>(content)
+            zip.close()
 
+            // 解析并格式化 JSON
+            val jsonElement = json.parseToJsonElement(content)
+            val prettyJson = json.encodeToString(JsonElement.serializer(), jsonElement)
+
+            // 提取安全关键字段摘要
+            val config = json.decodeFromString<HapConfig>(content)
             val sb = StringBuilder()
-            sb.appendLine("=== HAP Manifest ===")
-            sb.appendLine("\n[App]")
+            sb.appendLine("=== HAP Manifest Summary ===")
             sb.appendLine("  bundleName: ${config.app.bundleName}")
-            sb.appendLine("  bundleType: ${config.app.bundleType}")
-            sb.appendLine("  versionCode: ${config.app.versionCode}")
             sb.appendLine("  versionName: ${config.app.versionName}")
             sb.appendLine("  debug: ${config.app.debug}")
-            sb.appendLine("  icon: ${config.app.icon.indexStr}")
-            sb.appendLine("  label: ${config.app.label.indexStr}")
+            sb.appendLine("  module.name: ${config.module.name}")
+            sb.appendLine("  module.type: ${config.module.type}")
 
-            sb.appendLine("\n[Module]")
-            sb.appendLine("  name: ${config.module.name}")
-            sb.appendLine("  type: ${config.module.type}")
-            sb.appendLine("  srcEntry: ${config.module.srcEntry}")
-            sb.appendLine("  mainElement: ${config.module.mainElement}")
-            sb.appendLine("  deviceTypes: ${config.module.deviceTypes}")
-            sb.appendLine("  deliveryWithInstall: ${config.module.deliveryWithInstall}")
-            sb.appendLine("  installationFree: ${config.module.installationFree}")
+            sb.appendLine("\n=== Full module.json ===")
+            sb.appendLine(prettyJson)
 
-            zip.close()
             sb.toString()
         } catch (e: Exception) {
             "Error: ${e.message}"

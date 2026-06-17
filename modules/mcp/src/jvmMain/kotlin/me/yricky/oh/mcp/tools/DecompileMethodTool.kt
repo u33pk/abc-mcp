@@ -49,8 +49,8 @@ class DecompileMethodTool(private val sessionManager: SessionManager) : Tool {
         val limit = args["limit"]?.jsonPrimitive?.intOrNull ?: StructuredDecompiler.MAX_DISPLAY_OUTPUT_LINES
         val abc = sessionManager.getOrOpen(path)
 
-        val classItem = abc.classes.values.find { it.name == className }
-            ?: return "Error: Class not found: $className"
+        val classItem = abc.findClassByName(className)
+            ?: return "Error: Class not found: $className. Use format: entry/src/main/ets/pages/ClassName"
 
         if (classItem !is AbcClass) return "Error: $className is not a full class definition"
 
