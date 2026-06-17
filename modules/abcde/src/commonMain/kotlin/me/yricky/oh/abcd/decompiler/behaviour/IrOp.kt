@@ -14,13 +14,134 @@ sealed interface IrOp {
             item.prefix?.let { prefix ->
                 return when(prefix){
                     0xfb.toByte() -> when(opCode){
-                        0x01.toByte() -> AssignObj(ObjField.Value(regId(item.opUnits[4]), regId(item.opUnits[3])), LoadReg.acc)
-                        0x02.toByte() -> AssignObj(ObjField.Index(regId(item.opUnits[4]),item.opUnits[3].toUnsignedInt()), LoadReg.acc)
+                        // === 已实现（原有） ===
+                        0x01.toByte() -> AssignObj(ObjField.Value(regId(item.opUnits[4]), regId(item.opUnits[3])), LoadReg.acc) // definefieldbyvalue
+                        0x02.toByte() -> AssignObj(ObjField.Index(regId(item.opUnits[4]),item.opUnits[3].toUnsignedInt()), LoadReg.acc) // definefieldbyindex
 
-                        0x09.toByte() -> LoadExternalModule(item.asm.code.method.clazz!!.moduleInfo!!.regularImports[item.opUnits[2].toUnsignedInt()]).st2Acc()
+                        0x09.toByte() -> LoadExternalModule(item.asm.code.method.clazz!!.moduleInfo!!.regularImports[item.opUnits[2].toUnsignedInt()]).st2Acc() // ldsendableexternalmodulevar
 
-                        0x13.toByte() -> UaExp.IsTrue(LoadReg.acc).st2Acc()
-                        0x14.toByte() -> UaExp.IsFalse(LoadReg.acc).st2Acc()
+                        0x13.toByte() -> UaExp.IsTrue(LoadReg.acc).st2Acc()  // callruntime.istrue
+                        0x14.toByte() -> UaExp.IsFalse(LoadReg.acc).st2Acc() // callruntime.isfalse
+
+                        // === 第 1 组：ACC 透传（NOP） ===
+                        // notifyconcurrentresult: 并发任务框架内部通知，无 TS 语法对应
+                        0x00.toByte() -> NOP
+                        // topropertykey: 运行时类型转换，TS 中属性键即值本身
+                        0x03.toByte() -> NOP
+                        // createprivateproperty: 仅分配私有字段槽位，无运行时可见效果
+                        0x04.toByte() -> NOP
+
+                        // === 第 2 组：私有字段定义 ===
+                        // defineprivateproperty imm1:u8, imm2:u16, imm3:u16, v:u8
+                        //   opUnits[2]=imm1(flags), [3]=imm2(slot,Short), [4]=imm3(unused,Short), [5]=v(obj reg)
+                        0x05.toByte() -> try {
+                            val slotIdx = (item.opUnits[3] as Short).toUShort().toInt()
+                            val objReg = regId(item.opUnits[5])
+                            AssignObj(ObjField.Index(objReg, slotIdx), LoadReg.acc)
+                        } catch (_: Throwable) { JustAnno("defineprivateproperty") }
+
+                        // === 第 3 组：Sendable 环境与变量 ===
+                        // callinit imm:u8, v:u8 — 调用 v 寄存器的初始化方法
+                        0x06.toByte() -> CallAcc(listOf(regId(item.opUnits[3]))).st2Acc()
+
+                        // definesendableclass — 类定义已在 func_main_0 中通过 defineclasswithbuffer 处理
+                        0x07.toByte() -> NOP
+
+                        // ldsendableclass imm:u16 — 从 sendable 环境加载类
+                        0x08.toByte() -> try {
+                            val idx = (item.opUnits[2] as Short).toUShort().toInt()
+                            LoadReg(FunSimCtx.RegId.lexId(0, idx)).st2Acc()
+                        } catch (_: Throwable) { JustAnno("ldsendableclass") }
+
+                        // wideldsendableexternalmodulevar imm:u16 — wide 变体，同 0x09
+                        0x0a.toByte() -> try {
+                            LoadExternalModule(item.asm.code.method.clazz!!.moduleInfo!!.regularImports[(item.opUnits[2] as Short).toUShort().toInt()]).st2Acc()
+                        } catch (_: Throwable) { JustAnno("wideldsendableexternalmodulevar") }
+
+                        // newsendableenv imm:u8 — 创建 sendable 词法环境（同 NewLexEnv，NOP）
+                        0x0b.toByte() -> NOP
+                        // widenewsendableenv imm:u16 — wide 变体
+                        0x0c.toByte() -> NOP
+
+                        // stsendablevar (4-bit) — imm1:u8(4-bit), imm2:u8(4-bit)
+                        0x0d.toByte() -> run {
+                            val packed = item.opUnits[2].toUnsignedInt()
+                            AssignReg(FunSimCtx.RegId.lexId(packed shr 4, packed and 0xf), LoadReg.acc)
+                        }
+                        // stsendablevar (8-bit) — imm1:u8, imm2:u8
+                        0x0e.toByte() -> AssignReg(
+                            FunSimCtx.RegId.lexId(item.opUnits[2].toUnsignedInt(), item.opUnits[3].toUnsignedInt()),
+                            LoadReg.acc
+                        )
+                        // widestsendablevar — imm1:u16, imm2:u16
+                        0x0f.toByte() -> AssignReg(
+                            FunSimCtx.RegId.lexId((item.opUnits[2] as Short).toUShort().toInt(), (item.opUnits[3] as Short).toUShort().toInt()),
+                            LoadReg.acc
+                        )
+
+                        // ldsendablevar (4-bit) — imm1:u8(4-bit), imm2:u8(4-bit)
+                        0x10.toByte() -> run {
+                            val packed = item.opUnits[2].toUnsignedInt()
+                            LoadReg(FunSimCtx.RegId.lexId(packed shr 4, packed and 0xf)).st2Acc()
+                        }
+                        // ldsendablevar (8-bit) — imm1:u8, imm2:u8
+                        0x11.toByte() -> LoadReg(
+                            FunSimCtx.RegId.lexId(item.opUnits[2].toUnsignedInt(), item.opUnits[3].toUnsignedInt())
+                        ).st2Acc()
+                        // wideldsendablevar — imm1:u16, imm2:u16
+                        0x12.toByte() -> LoadReg(
+                            FunSimCtx.RegId.lexId((item.opUnits[2] as Short).toUShort().toInt(), (item.opUnits[3] as Short).toUShort().toInt())
+                        ).st2Acc()
+
+                        // === 第 4 组：惰性模块加载 ===
+                        // ldlazymodulevar imm:u8 — 惰性加载本地模块变量
+                        0x15.toByte() -> try {
+                            val moduleInfo = item.asm.code.method.clazz!!.moduleInfo!!
+                            LoadLocalModuleVar(moduleInfo.localExports[item.opUnits[2].toUnsignedInt()]).st2Acc()
+                        } catch (_: Throwable) { JustAnno("ldlazymodulevar #${item.opUnits[2].toUnsignedInt()}") }
+
+                        // wideldlazymodulevar imm:u16 — wide 变体
+                        0x16.toByte() -> try {
+                            val moduleInfo = item.asm.code.method.clazz!!.moduleInfo!!
+                            LoadLocalModuleVar(moduleInfo.localExports[(item.opUnits[2] as Short).toUShort().toInt()]).st2Acc()
+                        } catch (_: Throwable) { JustAnno("wideldlazymodulevar #${item.opUnits[2]}") }
+
+                        // ldlazysendablemodulevar imm:u8 — 惰性加载 sendable 模块变量
+                        0x17.toByte() -> try {
+                            val moduleInfo = item.asm.code.method.clazz!!.moduleInfo!!
+                            LoadLocalModuleVar(moduleInfo.localExports[item.opUnits[2].toUnsignedInt()]).st2Acc()
+                        } catch (_: Throwable) { JustAnno("ldlazysendablemodulevar #${item.opUnits[2].toUnsignedInt()}") }
+
+                        // wideldlazysendablemodulevar imm:u16 — wide 变体
+                        0x18.toByte() -> try {
+                            val moduleInfo = item.asm.code.method.clazz!!.moduleInfo!!
+                            LoadLocalModuleVar(moduleInfo.localExports[(item.opUnits[2] as Short).toUShort().toInt()]).st2Acc()
+                        } catch (_: Throwable) { JustAnno("wideldlazysendablemodulevar #${item.opUnits[2]}") }
+
+                        // === 第 5 组：调用操作 ===
+                        // supercallforwardallargs v:u8 — 转发所有参数给 super()
+                        //   opUnits[2]=v(this reg)
+                        0x19.toByte() -> try {
+                            val thisReg = regId(item.opUnits[2])
+                            val code = item.asm.code
+                            val numArgs = code.numArgs
+                            val firstArg = code.numVRegs
+                            CallAcc((0 until numArgs).map { regId(firstArg + it) }, thisReg).st2Acc()
+                        } catch (_: Throwable) { JustAnno("supercallforwardallargs") }
+
+                        // === Sendable 本地模块变量 ===
+                        // ldsendablelocalmodulevar imm:u8
+                        0x1a.toByte() -> try {
+                            val moduleInfo = item.asm.code.method.clazz!!.moduleInfo!!
+                            LoadLocalModuleVar(moduleInfo.localExports[item.opUnits[2].toUnsignedInt()]).st2Acc()
+                        } catch (_: Throwable) { JustAnno("ldsendablelocalmodulevar #${item.opUnits[2].toUnsignedInt()}") }
+
+                        // wideldsendablelocalmodulevar imm:u16
+                        0x1b.toByte() -> try {
+                            val moduleInfo = item.asm.code.method.clazz!!.moduleInfo!!
+                            LoadLocalModuleVar(moduleInfo.localExports[(item.opUnits[2] as Short).toUShort().toInt()]).st2Acc()
+                        } catch (_: Throwable) { JustAnno("wideldsendablelocalmodulevar #${item.opUnits[2]}") }
+
                         else -> UnImplemented(item)
                     }
                     0xfc.toByte() -> when(opCode){

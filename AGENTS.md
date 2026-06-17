@@ -107,12 +107,12 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 |------|------|
 | `open_abc` | 打开 ABC 文件，返回基本信息 |
 | `list_classes` | 列出所有类名，支持正则过滤 |
-| `get_class_detail` | 获取类详情（父类、字段、方法列表；func_main_0 中识别到重组 class 时会展示摘要） |
+| `get_class_detail` | 获取类详情（父类、字段、方法列表含字节码大小；func_main_0 中识别到重组 class 时会展示摘要） |
 | `reconstruct_class` | 从 func_main_0 中重组并输出指定 ArkTS/ETS class 的语法（含字段与方法签名，不展开方法体） |
-| `decompile_class` | 反编译指定类的所有方法 |
-| `decompile_method` | 反编译指定方法 |
+| `decompile_class` | 反编译指定类的所有方法（支持 `max_methods` 限制，默认 20） |
+| `decompile_method` | 反编译指定方法（支持 `offset`/`limit` 分页；超大方法自动返回摘要） |
 | `search_strings` | 搜索字符串常量（正则匹配） |
-| `disassemble_method` | 获取方法的字节码反汇编 |
+| `disassemble_method` | 获取方法的字节码反汇编（支持 `offset`/`limit` 分页，默认 200 行） |
 | `get_method_info` | 获取方法详情（参数名、行号、调试信息） |
 | `get_xrefs_to_method` | 查找方法的调用者（交叉引用） |
 | `get_xrefs_to_field` | 查找字段的读取者和写入者（交叉引用） |
@@ -269,7 +269,7 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - `search_resources` / `resolve_resource` / `open_hap` 在 Kazumi HAP 上已可正常工作
 8. **方法内搜索** ✅
    - 新增 `search_in_method` 工具：在指定方法内按正则搜索反汇编文本，返回匹配行及上下文
-   - 不触发完整反编译，因此适用于超大方法，不受 100 行展示上限和 10 MB 输出预算限制
+   - 不触发完整反编译，因此适用于超大方法，不受 100 行展示上限和 1 MB 输出预算限制
    - 可同时定位字符串常量、方法调用、字段访问等在方法体内的具体位置
 9. **模块变量指令实现** ✅
    - 实现 `stmodulevar`（0x7c）/ `wide.stmodulevar`（0xfd+0x0f）：将 ACC 存储到模块 localExports 槽位
@@ -335,40 +335,37 @@ _acc_ = AtkTsGlobal.print(_acc_);
     - 新增 `reconstruct_class` MCP tool，可直接获取指定重组 class 的字段与签名概览
     - `get_class_detail` 新增展示 `func_main_0` 中识别到的重组类摘要
     - 新增 `ClassReconstructionValidationTest` HAP 扫描验证：1412 个含 `func_main_0` 的模块共识别 1389 个 class、1503 个字段、10450 个方法，无崩溃、无重复类名
+20. **callruntime.* 指令全面实现** ✅
+    - 实现 prefix `0xfb` 下全部 23 条未实现 callruntime 指令（原有 5 条 + 新增 23 条 = 28 条全覆盖）
+    - 零新 IrOp 类型：全部映射到已有 NOP、LoadReg、AssignReg、CallAcc、LoadExternalModule、LoadLocalModuleVar 等类型，无需修改代码生成器和优化器
+    - 分组实现：NOP 透传（`notifyconcurrentresult`、`topropertykey`、`createprivateproperty`）、私有字段定义（`defineprivateproperty`）、Sendable 变量/环境/模块（13 条，复用 lexId 寻址）、惰性模块加载（4 条）、调用操作（`callinit`、`supercallforwardallargs`）
+    - 新增 `CallruntimeValidationTest` + `CallruntimeSpotCheckTest` HAP 扫描验证：4 个 HAP 共 5831 条 callruntime 指令全部实现，0 条未实现
+    - HISH 扫描：未实现指令从 15 降至 0
+21. **超大方法 OOM 防护与分页** ✅
+    - 早期大小检测：指令数 > 1000 的方法直接返回摘要 + 反汇编片段，跳过完整反编译管线（避免 ~32MB 峰值内存）
+    - 降低生成预算：`MAX_TOTAL_OUTPUT_SIZE` 从 10MB 降至 1MB
+    - `decompile_method` 新增 `offset`/`limit` 分页参数
+    - `decompile_class` 新增 `max_methods`（默认 20）参数，防止类级输出撑爆上下文
+    - `disassemble_method` 新增 `offset`/`limit` 参数（默认 200 行），消除无限制输出
+    - `get_class_detail` 方法列表新增字节码大小 `[N bytes]` 元数据
+    - `MethodSummary.from()` 消除截断时的双重 `genGraph()` 调用
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）
 - ✅ `open_hap` 资源解析异常处理：捕获 `Throwable`，避免不兼容 `resources.index` 导致 OOM 崩溃
 - ✅ `HapSignBlocks` 整数溢出修复：大 HAP 文件（>2GB 偏移）的签名块解析 `.toInt()` 溢出导致 `Range out of bounds` 错误，新增 Long 范围检查
 
-### 未实现指令（剩余主要类别，基于实现前快照）
+### 未实现指令
 
-> async/await 与 generator 相关指令已实现，下表不再包含该类别。
-
-| 类别 | 指令 | 命中 | 说明 |
-|------|------|------|------|
-| 其他 | `callruntime.*` | - | 并发任务相关运行时调用 |
-
-> 当前 `/Users/vv/project/unitTest/hap/hish.20250704.hap` 扫描结果（HISH）：`getiterator` 与 `throw.ifnotobject` 已实现，剩余未实现主要集中在 `callruntime.*` 系列（如 `callruntime.notifyconcurrentresult`、`callruntime.supercallforwardallargs` 等）。
+> 当前 HISH 扫描结果：**0 条未实现指令**。`callruntime.*` 系列（23 条）已全部实现。
 
 ### 未来工作
 
-#### 词法环境指令输出优化
+#### ~~词法环境指令输出优化~~ ✅ 已完成
 
-当前词法环境名称解析已能正确工作，但在含 `newlexenv*` / `poplexenv` 的基本块中禁用了完整 IR 优化，导致输出保留 `_acc_ = arg0; menuItems = _acc_;` 这类 ACC 中转语法。下一步优化方向：
-
-1. **恢复词法环境块内的 ACC 拷贝传播**
-   - 目标：将 `_acc_ = X; Y = _acc_;` 合并为 `Y = X;`
-   - 依赖：修复/增强优化器对 lexical 变量（`__lexXX__`）和闭包作用域的处理
-2. **让词法环境节点在优化过程中可追踪**
-   - 当前 `NewLexEnv` / `NewLexEnvWithName` / `PopLexEnv` 为 `TraitNOP`，优化器直接透传
-   - 可改为非 NOP 标记节点，使优化器在传播表达式时 aware 到作用域边界，避免跨环境错误传播
-3. **消除 `.length` 链式膨胀等错误表达式**
-   - 在 `ExpressionPropagationPass` / `CopyPropagationPass` 中增加对 lexical 寄存器和循环引用的检测
-   - 参考 `ExpressionPropagationPass.resolveReg` 已有的循环检测机制，统一加到所有传播路径
-4. **补充回归测试**
-   - 在 `LexEnvValidationTest` 中增加断言：反编译输出不能出现 `.length` 无限重复等异常模式
-   - 选取 3~5 个典型闭包方法作为固定样本，检查输出语法正确性
+词法环境块内 ACC 优化已恢复。`generateLinearBlock` 移除了 `containsLexEnvOps` 粗粒度旁路，
+统一走优化器路径。`LexEnvNameResolver.buildLexEnvStacks` 从优化结果重建栈，确保名称解析正确。
+`ExpressionPropagationPass` 的 `else` 分支已天然重置函数合并追踪，无需额外修改。
 
 #### class 语法重组（已实现）
 

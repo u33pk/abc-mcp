@@ -79,7 +79,7 @@ class StructuredToJs(
 ) {
     companion object {
         /** 单个方法反编译输出的最大字符数（10 MB） */
-        const val MAX_TOTAL_OUTPUT_SIZE = 10 * 1024 * 1024
+        const val MAX_TOTAL_OUTPUT_SIZE = 1 * 1024 * 1024  // 1 MB — 超出此预算的方法通过早期检测直接返回摘要
         /** 字面量数组/对象最多完整展示的元素/键值对数量 */
         const val MAX_LITERAL_ARRAY_SIZE = 1000
     }
@@ -994,27 +994,32 @@ class StructuredToJs(
         when (block) {
             is CodeSegment.Linear -> {
                 val items = block.toList()
-                val containsLexEnvOps = items.any { isLexEnvOp(it.irOp) }
 
-                if (containsLexEnvOps) {
-                    // 块内含词法环境操作，按原始指令顺序逐条生成，确保名称解析精确
-                    for (item in items) {
-                        currentLexEnvStack = perOpStacks[item.index]
-                        val irOp = item.irOp
-                        if (irOp is IrOp.NOP || irOp is IrOp.JustAnno || isLexEnvOp(irOp)) continue
-                        out.safeAppend("$indentStr${generateIrOp(irOp)}\n")
-                    }
-                } else {
-                    // 收集所有指令并优化
-                    val ops = items.map { it.irOp }
-                    val liveOut = mutableSetOf<FunSimCtx.RegId>()
-                    liveOut.add(FunSimCtx.RegId.ACC)
-                    val optimizedOps = IrOpOptimizer.optimizeList(ops, liveOut)
+                // 始终运行优化器（TraitNOP 类型的 lex env ops 在优化后保持原位）
+                val ops = items.map { it.irOp }
+                val liveOut = mutableSetOf<FunSimCtx.RegId>()
+                liveOut.add(FunSimCtx.RegId.ACC)
+                val optimizedOps = IrOpOptimizer.optimizeList(ops, liveOut)
 
-                    for (irOp in optimizedOps) {
-                        if (irOp is IrOp.NOP || irOp is IrOp.JustAnno) continue
-                        out.safeAppend("$indentStr${generateIrOp(irOp)}\n")
+                // 从优化结果重建 lex env 栈（索引与 optimizedOps 对齐）
+                val hasLexEnvOps = optimizedOps.any { LexEnvNameResolver.isLexEnvOp(it) }
+                val optimizedStacks = if (hasLexEnvOps) {
+                    LexEnvNameResolver.buildLexEnvStacks(optimizedOps)
+                } else null
+
+                for ((idx, irOp) in optimizedOps.withIndex()) {
+                    if (irOp is IrOp.NOP || irOp is IrOp.JustAnno) continue
+                    if (LexEnvNameResolver.isLexEnvOp(irOp)) {
+                        // 更新 lex env 栈，但不输出
+                        if (optimizedStacks != null) {
+                            currentLexEnvStack = optimizedStacks[idx]
+                        }
+                        continue
                     }
+                    if (optimizedStacks != null) {
+                        currentLexEnvStack = optimizedStacks[idx]
+                    }
+                    out.safeAppend("$indentStr${generateIrOp(irOp)}\n")
                 }
             }
             is CodeSegment.Return -> {

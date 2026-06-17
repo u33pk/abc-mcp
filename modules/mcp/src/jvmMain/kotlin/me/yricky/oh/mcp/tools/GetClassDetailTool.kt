@@ -83,7 +83,13 @@ class GetClassDetailTool(private val sessionManager: SessionManager) : Tool {
                 } else {
                     method.name
                 }
-                sb.appendLine("  $methodName")
+                val code = method.codeItem
+                if (code != null) {
+                    val sizeBytes = code.codeSize
+                    sb.appendLine("  $methodName [${sizeBytes}b]")
+                } else {
+                    sb.appendLine("  $methodName [abstract/native]")
+                }
             }
 
             // 尝试从 func_main_0 中重组 ArkTS class

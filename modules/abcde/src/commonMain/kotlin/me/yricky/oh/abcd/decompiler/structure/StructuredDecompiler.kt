@@ -10,6 +10,7 @@ import me.yricky.oh.abcd.decompiler.structure.reconstruction.ClassReconstruction
 import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.abcd.isa.calledMethods
 import me.yricky.oh.abcd.isa.calledStrings
+import me.yricky.oh.abcd.isa.util.fullDisasmLine
 import me.yricky.oh.common.value
 
 /**
@@ -21,12 +22,24 @@ object StructuredDecompiler {
     /** 返回给 LLM 的部分代码最大行数，避免无法完整反编译的方法占用过多上下文 */
     const val MAX_DISPLAY_OUTPUT_LINES = 100
 
+    /** 早期退出阈值：指令数超过此值的方法直接返回摘要，不走完整反编译管线 */
+    const val EARLY_EXIT_INSTRUCTION_THRESHOLD = 1000
+
     /**
      * 反编译单个方法
      * @param asm 方法的反汇编结果
+     * @param offset 起始行号（0-based），用于分页
+     * @param limit 返回行数上限
      * @return 反编译后的代码字符串
      */
-    fun decompile(asm: Asm): String {
+    fun decompile(asm: Asm, offset: Int = 0, limit: Int = MAX_DISPLAY_OUTPUT_LINES): String {
+        val instructionCount = asm.list.size
+
+        // 早期检测：指令数 > 阈值时，直接返回摘要，不走完整管线（避免 OOM）
+        if (instructionCount > EARLY_EXIT_INSTRUCTION_THRESHOLD) {
+            return generateEarlyExitSummary(asm, offset, limit)
+        }
+
         return try {
             // 1. 构建 CFG（try/catch 边界已作为独立基本块切分）
             val codeSegments = CodeSegment.genGraph(asm)
@@ -44,13 +57,14 @@ object StructuredDecompiler {
             val structuredRegion = analysis.analyze()
 
             // 4. 生成代码（主图 + 单独标注的 catch handler）
-            generateCode(structuredRegion as Region, asm, buildResult.catchHandlers)
+            val fullOutput = generateCode(structuredRegion as Region, asm, buildResult.catchHandlers)
+            applyPagination(fullOutput, offset, limit)
         } catch (e: OutputTooLargeException) {
             // 输出超出预算：返回部分代码 + 方法摘要，避免降级到线性反编译再次 OOM
-            formatTruncatedOutput(asm, e)
+            formatTruncatedOutput(asm, e, offset, limit)
         } catch (e: Exception) {
             // 结构化分析失败时，仍按基本块顺序输出，并保留 try/catch 标注
-            return "// Structure analysis failed: ${e.message}\n" +
+            val fallback = "// Structure analysis failed: ${e.message}\n" +
                    "// Falling back to linear block decompilation\n" +
                    try {
                        val fallbackSegments = CodeSegment.genGraph(asm)
@@ -61,13 +75,69 @@ object StructuredDecompiler {
                    } catch (e2: Exception) {
                        "// Linear block decompilation also failed: ${e2.message}"
                    }
+            applyPagination(fallback, offset, limit)
+        }
+    }
+
+    /**
+     * 对超出早期退出阈值的超大方法，生成摘要信息（不走反编译管线）
+     */
+    private fun generateEarlyExitSummary(asm: Asm, offset: Int, limit: Int): String {
+        val method = asm.code.method
+        val decodedName = decodeMethodName(method)
+        val restIndex = asm.irOpList.filterIsInstance<IrOp.CopyRestArgs>().firstOrNull()?.startIdx ?: -1
+        val args = method.argsStr(restIndex)
+        val instructionCount = asm.list.size
+        val vregCount = asm.code.numVRegs
+        val hasTryCatch = asm.code.tryBlocks.isNotEmpty()
+
+        val allStrings = asm.list.flatMap { it.calledStrings.asIterable() }
+        val uniqueStrings = allStrings.distinct()
+        val topStrings = uniqueStrings.sortedByDescending { it.length }.take(10)
+
+        val allMethods = asm.list.flatMap { it.calledMethods.asIterable() }
+        val topCalledMethods = allMethods.distinct()
+            .map { "${it.clazz?.name ?: "?"}.${decodeMethodName(it)}" }
+            .distinct().take(10)
+
+        // 生成部分反汇编输出（轻量级，不走反编译管线）
+        val disasmLines = asm.list.drop(offset).take(limit).map { item ->
+            try { item.fullDisasmLine() } catch (_: Throwable) { "???" }
+        }
+
+        return buildString {
+            appendLine("// [method too large: $instructionCount instructions, ${vregCount} vregs]")
+            appendLine("// Use search_in_method with regex for targeted analysis.")
+            appendLine("// Method: $decodedName($args)")
+            if (hasTryCatch) appendLine("// Has try-catch blocks")
+            if (topStrings.isNotEmpty()) appendLine("// Top strings: $topStrings")
+            if (topCalledMethods.isNotEmpty()) appendLine("// Top called: $topCalledMethods")
+            if (offset > 0 || limit < instructionCount) {
+                appendLine("// Showing disassembly lines [$offset, ${offset + disasmLines.size}) / $instructionCount total")
+            }
+            appendLine()
+            for (line in disasmLines) {
+                appendLine(line)
+            }
         }
     }
 
     /**
      * 反编译并返回详细信息
      */
-    fun decompileWithInfo(asm: Asm): DecompileResult {
+    fun decompileWithInfo(asm: Asm, offset: Int = 0, limit: Int = MAX_DISPLAY_OUTPUT_LINES): DecompileResult {
+        val instructionCount = asm.list.size
+
+        // 早期检测：指令数 > 阈值时，直接返回摘要
+        if (instructionCount > EARLY_EXIT_INSTRUCTION_THRESHOLD) {
+            return DecompileResult(
+                success = false,
+                code = generateEarlyExitSummary(asm, offset, limit),
+                regionCount = 0,
+                method = "too_large"
+            )
+        }
+
         return try {
             val codeSegments = CodeSegment.genGraph(asm)
             val builder = RegionGraphBuilder(codeSegments, asm.code.tryBlocks)
@@ -80,20 +150,19 @@ object StructuredDecompiler {
             )
             val structuredRegion = analysis.analyze()
 
+            val fullOutput = generateCode(structuredRegion as Region, asm, buildResult.catchHandlers)
             DecompileResult(
                 success = true,
-                code = generateCode(structuredRegion as Region, asm, buildResult.catchHandlers),
+                code = applyPagination(fullOutput, offset, limit),
                 regionCount = buildResult.graph.nodes.size,
                 method = "structured"
             )
         } catch (e: OutputTooLargeException) {
-            val summary = MethodSummary.from(asm, e.generatedChars)
             DecompileResult(
                 success = false,
-                code = formatTruncatedOutput(asm, e),
+                code = formatTruncatedOutput(asm, e, offset, limit),
                 regionCount = 0,
-                method = "truncated",
-                summary = summary
+                method = "truncated"
             )
         } catch (e: Exception) {
             DecompileResult(
@@ -148,9 +217,24 @@ object StructuredDecompiler {
     }
 
     /**
+     * 从完整输出中按行分页
+     */
+    private fun applyPagination(output: String, offset: Int, limit: Int): String {
+        if (offset == 0 && limit >= MAX_DISPLAY_OUTPUT_LINES) return output
+        val lines = output.lines()
+        val totalLines = lines.size
+        if (offset >= totalLines) return "// [offset $offset beyond total $totalLines lines]"
+        val page = lines.drop(offset).take(limit)
+        val header = if (offset > 0 || limit < totalLines) {
+            "// [lines $offset-${offset + page.size} / $totalLines total]\n"
+        } else ""
+        return header + page.joinToString("\n")
+    }
+
+    /**
      * 组装截断后的最终输出：摘要注释 + 部分代码（总输出控制在 [MAX_DISPLAY_OUTPUT_LINES] 行以内）
      */
-    private fun formatTruncatedOutput(asm: Asm, e: OutputTooLargeException): String {
+    private fun formatTruncatedOutput(asm: Asm, e: OutputTooLargeException, offset: Int = 0, limit: Int = MAX_DISPLAY_OUTPUT_LINES): String {
         val summary = MethodSummary.from(asm, e.generatedChars)
         val summaryText = buildString {
             appendLine("// [method too large, generated ${summary.totalGeneratedChars} chars total]")
@@ -217,14 +301,14 @@ object StructuredDecompiler {
         companion object {
             private const val TOP_N = 20
 
-            fun from(asm: Asm, totalGeneratedChars: Int = 0): MethodSummary {
+            fun from(asm: Asm, totalGeneratedChars: Int = 0, codeSegments: Map<Int, CodeSegment.BasicBlock>? = null): MethodSummary {
                 val method = asm.code.method
                 val decodedName = decodeMethodName(method)
                 val restIndex = asm.irOpList.filterIsInstance<IrOp.CopyRestArgs>().firstOrNull()?.startIdx ?: -1
                 val args = method.argsStr(restIndex)
 
-                val codeSegments = CodeSegment.genGraph(asm)
-                val basicBlockCount = codeSegments.size
+                val segments = codeSegments ?: CodeSegment.genGraph(asm)
+                val basicBlockCount = segments.size
 
                 val allStrings = asm.list.flatMap { it.calledStrings.asIterable() }
                 val uniqueStrings = allStrings.distinct()
