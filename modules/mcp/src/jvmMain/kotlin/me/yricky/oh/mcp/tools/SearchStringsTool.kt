@@ -2,6 +2,7 @@ package me.yricky.oh.mcp.tools
 
 import kotlinx.serialization.json.*
 import me.yricky.oh.abcd.cfm.AbcClass
+import me.yricky.oh.abcd.decompiler.structure.decodeMethodName
 import me.yricky.oh.abcd.isa.InstFmt
 import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.mcp.session.SessionManager
@@ -46,7 +47,8 @@ class SearchStringsTool(private val sessionManager: SessionManager) : Tool {
                                 if (fmt is InstFmt.SId) {
                                     val str = fmt.getString(item)
                                     if (regex.containsMatchIn(str)) {
-                                        results.add("${classItem.name}.${method.name}: \"$str\"")
+                                        val methodName = if (method is me.yricky.oh.abcd.cfm.AbcMethod) decodeMethodName(method) else method.name
+                                        results.add("${classItem.name}.$methodName: \"$str\"")
                                     }
                                 }
                             }
