@@ -2,7 +2,9 @@ package me.yricky.oh.mcp.tools
 
 import kotlinx.serialization.json.*
 import me.yricky.oh.abcd.cfm.AbcClass
+import me.yricky.oh.abcd.decompiler.structure.StructuredDecompiler
 import me.yricky.oh.abcd.decompiler.structure.decodeMethodName
+import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.mcp.session.SessionManager
 
 class GetClassDetailTool(private val sessionManager: SessionManager) : Tool {
@@ -82,6 +84,23 @@ class GetClassDetailTool(private val sessionManager: SessionManager) : Tool {
                     method.name
                 }
                 sb.appendLine("  $methodName")
+            }
+
+            // 尝试从 func_main_0 中重组 ArkTS class
+            val entryMethod = classItem.methods.find { it.name == AbcClass.ENTRY_FUNC_NAME }
+            if (entryMethod != null) {
+                val code = entryMethod.codeItem
+                if (code != null) {
+                    val reconstructed = StructuredDecompiler.reconstructClasses(Asm(code))
+                    if (reconstructed.isNotEmpty()) {
+                        sb.appendLine("\nReconstructed Classes (${reconstructed.size}):")
+                        reconstructed.forEach { clazz ->
+                            sb.appendLine("  class ${clazz.className} extends ${clazz.superClassName ?: "<none>"}")
+                            sb.appendLine("    fields: ${clazz.fields.size}")
+                            sb.appendLine("    methods: ${clazz.allMethods.size}")
+                        }
+                    }
+                }
             }
         }
 

@@ -100,14 +100,15 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 ### 入口
 `me.yricky.oh.mcp.MainKt`
 
-### 暴露的 Tools（18 个）
+### 暴露的 Tools（19 个）
 
 #### ABC 字节码工具
 | Tool | 功能 |
 |------|------|
 | `open_abc` | 打开 ABC 文件，返回基本信息 |
 | `list_classes` | 列出所有类名，支持正则过滤 |
-| `get_class_detail` | 获取类详情（父类、字段、方法列表） |
+| `get_class_detail` | 获取类详情（父类、字段、方法列表；func_main_0 中识别到重组 class 时会展示摘要） |
+| `reconstruct_class` | 从 func_main_0 中重组并输出指定 ArkTS/ETS class 的语法（含字段与方法签名，不展开方法体） |
 | `decompile_class` | 反编译指定类的所有方法 |
 | `decompile_method` | 反编译指定方法 |
 | `search_strings` | 搜索字符串常量（正则匹配） |
@@ -299,7 +300,7 @@ _acc_ = AtkTsGlobal.print(_acc_);
     - 实现 `throw.ifsupernotcorrectcall`（prefix `0xfe`，opcode `0x07` imm8 / `0x08` imm16）
     - 该指令为方舟编译器在 `super()` / `super.method()` 调用前插入的运行时校验，正常代码不触发，无对应 TS/ArkTS 语法
     - 映射为 `IrOp.NOP`，消除反编译输出中 `/* unimplemented: throw.ifsupernotcorrectcall */` 占位注释
-    - 在 `/home/orz/project/unitTest/hap` 样本中验证：455 个含该指令的方法均不再输出未实现注释
+    - 在 `/Users/vv/project/unitTest/hap` 样本中验证：455 个含该指令的方法均不再输出未实现注释
 16. **词法环境指令实现与变量名解析** ✅
     - 实现 `newlexenv`（0x09）/ `wide.newlexenv`（0xfd 0x02）、`newlexenvwithname`（0xb6）/ `wide.newlexenvwithname`（0xfd 0x03）、`poplexenv`（0x69）/ `deprecated.poplexenv`（0xfc 0x01）
     - 新增 IR 节点 `NewLexEnv` / `NewLexEnvWithName` / `PopLexEnv`（均为 NOP，不污染输出）
@@ -307,7 +308,7 @@ _acc_ = AtkTsGlobal.print(_acc_);
     - 在 `StructuredToJs` 与 `ToJs` 中按原始指令位置维护词法环境栈，将 `ldlexvar`/`stlexvar` 的 `__lex{lvl}_{slot}__` 占位符替换为真实变量名
     - 对未知槽位或 `newlexenv`（无 name）回退 `__lex{lvl}_{slot}__`，避免输出混淆
     - 新增 `LexEnvNameResolver` 工具类、`LexEnvNameResolutionTest` 单元测试、`LexEnvValidationTest` HAP 扫描验证
-    - 在 `/home/orz/project/unitTest/hap` 样本中验证：1562 个含词法环境指令的方法全部正确映射 IR，1180 个含 `newlexenvwithname` 的方法中 974 个成功将 `__lexXX__` 解析为真实名称
+    - 在 `/Users/vv/project/unitTest/hap` 样本中验证：1562 个含词法环境指令的方法全部正确映射 IR，1180 个含 `newlexenvwithname` 的方法中 974 个成功将 `__lexXX__` 解析为真实名称
 17. **`starrayspread` 数组展开指令实现** ✅
     - 新增 IR 模型：`ArrayElement` / `ArrayLiteral` / `SpreadIntoArray`
     - 将 `createemptyarray` / `createarraywithbuffer` 映射为 `ArrayLiteral`，`starrayspread` 映射为以 ACC 为源对象的 `SpreadIntoArray`
@@ -315,7 +316,7 @@ _acc_ = AtkTsGlobal.print(_acc_);
     - 无法追踪或源含副作用时降级为 `arr.push(...src);`，保证语义正确
     - `StructuredToJs` / `ToJs` 新增数组字面量与展开元素渲染
     - 新增 `ArraySpreadMergingPassTest` 单元测试、`StarrayspreadValidationTest` HAP 扫描验证
-    - 在 `/home/orz/project/unitTest/hap` 样本中验证：58 个含 `starrayspread` 的方法全部成功反编译，其中 34 个生成 `[...x]` 字面量形式（24 个因数组对象无法在同一基本块追踪而降级为 `.push(...)`）
+    - 在 `/Users/vv/project/unitTest/hap` 样本中验证：58 个含 `starrayspread` 的方法全部成功反编译，其中 34 个生成 `[...x]` 字面量形式（24 个因数组对象无法在同一基本块追踪而降级为 `.push(...)`）
 18. **迭代器相关指令实现与 for-of/for-in 语法降级** ✅
     - 实现 `getiterator`（0x67/0xab）、`getpropiterator`（0x66）、`getnextpropname`（0x36）、`closeiterator`（0x68/0xac）、`deprecated.getiteratornext`（0xfc 0x02）的 IR 映射
     - 新增 `ForOfStatement` / `ForInStatement` 语句类型
@@ -323,7 +324,17 @@ _acc_ = AtkTsGlobal.print(_acc_);
     - 修复 `CodeSegment.genGraph` 对 `JumpIf` 前缀指令的拆分，避免迭代器循环头部的副作用语句被丢弃
     - 修复 `RegionGraphBuilder.cleanUnreachableNodes` 迭代清理不可达节点，防止 for-of 中 cleanup 块导致结构化分析失败
     - 新增 `IteratorOpcodeTest` 单元测试（es2abc 编译真实 JS 片段后反编译验证）
-    - 新增 `IteratorOpcodeValidationTest` HAP 扫描验证：对 `/home/orz/project/unitTest/hap` 抽样含迭代器 opcode 的方法反编译，确保不崩溃
+    - 新增 `IteratorOpcodeValidationTest` HAP 扫描验证：对 `/Users/vv/project/unitTest/hap` 抽样含迭代器 opcode 的方法反编译，确保不崩溃
+19. **class 语法重组** ✅
+    - 在 `func_main_0` 中识别 `defineclasswithbuffer`（`IrOp.NewClass`）模式，将其转换为 `class Foo extends Bar { ... }` 语法
+    - 解析 class literal buffer 获取构造器、字段（getter/setter）与实例/静态方法
+    - 通过 prototype 寄存器别名追踪与 ACC 别名处理，支持 ArkCompiler 生成的字段定义序列
+    - 父类解析：优先从 ABC 类头/NewClass parent 寄存器回溯，无法解析时回退为可读表达式（如 `AtkTsGlobal.ViewPU`）
+    - 重复 class 块检测：基于构造器方法去重，避免 `finalizeConstruction` 等编译器生成的多路径重复输出
+    - 反编译输出中直接渲染 class 声明；新增 `ReconstructedClassRenderer` 用于独立输出 class 语法（仅字段与方法签名，不展开方法体）
+    - 新增 `reconstruct_class` MCP tool，可直接获取指定重组 class 的字段与签名概览
+    - `get_class_detail` 新增展示 `func_main_0` 中识别到的重组类摘要
+    - 新增 `ClassReconstructionValidationTest` HAP 扫描验证：1412 个含 `func_main_0` 的模块共识别 1389 个 class、1503 个字段、10450 个方法，无崩溃、无重复类名
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）
@@ -338,7 +349,7 @@ _acc_ = AtkTsGlobal.print(_acc_);
 |------|------|------|------|
 | 其他 | `callruntime.*` | - | 并发任务相关运行时调用 |
 
-> 当前 `/home/orz/project/unitTest/hap/hish.20250704.hap` 扫描结果（HISH）：`getiterator` 与 `throw.ifnotobject` 已实现，剩余未实现主要集中在 `callruntime.*` 系列（如 `callruntime.notifyconcurrentresult`、`callruntime.supercallforwardallargs` 等）。
+> 当前 `/Users/vv/project/unitTest/hap/hish.20250704.hap` 扫描结果（HISH）：`getiterator` 与 `throw.ifnotobject` 已实现，剩余未实现主要集中在 `callruntime.*` 系列（如 `callruntime.notifyconcurrentresult`、`callruntime.supercallforwardallargs` 等）。
 
 ### 未来工作
 
@@ -359,16 +370,21 @@ _acc_ = AtkTsGlobal.print(_acc_);
    - 在 `LexEnvValidationTest` 中增加断言：反编译输出不能出现 `.length` 无限重复等异常模式
    - 选取 3~5 个典型闭包方法作为固定样本，检查输出语法正确性
 
-#### class 语法重组
+#### class 语法重组（已实现）
 
-`func_main_0` 中的 `defineclasswithbuffer` + `definemethod` + `Object.defineProperty` 模式可重组为 `class Foo extends Bar { method() {...} }` 语法。当前 `definemethod` 作为 NOP 透传，不影响反编译流程但不生成 class 语法。
+`func_main_0` 中的 `defineclasswithbuffer` + `definemethod` + `Object.defineProperty` 模式已重组为 `class Foo extends Bar { method() {...} }` 语法。当前 `definemethod` 仍作为 NOP 透传，但 class 创建块已被 `ClassReconstructionPass` 提取并渲染为 class 声明，其余 import、顶层变量、常量初始化等代码保持原样。
 
 调研结论：
 - `func_main_0` 是 ArkCompiler 生成的**模块入口函数**，对应 `.ets` 源文件的顶层作用域。
-- `get_class_detail` 目前返回的是**文件级 module record**，真正的 ArkTS 类藏在 `func_main_0` 的 `defineclasswithbuffer` 指令里。
-- class 重组应只提取 `func_main_0` 中的 class 创建块，其余 import、顶层变量、常量初始化等代码保持原样。
+- `get_class_detail` 返回的是**文件级 module record**，真正的 ArkTS 类藏在 `func_main_0` 的 `defineclasswithbuffer` 指令里。
+- class 重组只提取 `func_main_0` 中的 class 创建块，其余顶层代码保持原样。
 
 详细方案见 [`docs/class-reconstruction-research.md`](docs/class-reconstruction-research.md)。
+
+待进一步优化：
+1. 提升 class 成员识别覆盖率（如跨基本块的方法挂载、静态方法/字段、带 `MethodAffiliate` 标志的方法分类）。
+2. 对 constructor 体进一步结构化，过滤 ArkCompiler 生成的 `FunctionObject`/`NewTarget` 参数默认值分支。
+3. 在反编译器结构化分析前更早地执行 class 重组，减少 class 创建块对 if/while 结构的干扰。
 
 ## 修改约定
 

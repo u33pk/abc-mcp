@@ -21,7 +21,7 @@ import java.util.zip.ZipFile
  */
 class LexEnvValidationTest {
 
-    private val hapDir = File("/home/orz/project/unitTest/hap")
+    private val hapDir = File("/Users/vv/project/unitTest/hap")
 
     /**
      * 超过此阈值的方法跳过完整反编译，仅做 IR 映射检查，避免超大/异常方法导致 OOM

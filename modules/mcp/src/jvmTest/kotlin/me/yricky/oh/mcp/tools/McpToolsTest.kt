@@ -3,6 +3,7 @@ package me.yricky.oh.mcp.tools
 import kotlinx.serialization.json.*
 import me.yricky.oh.mcp.session.SessionManager
 import org.junit.Assume
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -247,5 +248,25 @@ class McpToolsTest {
         assertTrue("Should resolve app_name", result.contains("Name: app_name"))
         assertTrue("Should contain type info", result.contains("Type:"))
         assertTrue("Should contain resolved value", result.contains("Kazumi"))
+    }
+
+    @Test
+    fun testReconstructClass() {
+        val abcFile = "/Users/vv/project/unitTest/hap/yingshilian-HM_abc/ets/modules.abc"
+        assumeFile(abcFile)
+        val result = callTool(
+            "reconstruct_class",
+            "path" to JsonPrimitive(abcFile),
+            "class_name" to JsonPrimitive("SimpleBrowser")
+        )
+        println(result)
+        assertTrue("Should output class declaration", result.startsWith("class SimpleBrowser"))
+        assertTrue("Should contain extends", result.contains("extends AtkTsGlobal.ViewPU"))
+        assertTrue("Should contain fields", result.contains("inputUrl: any;"))
+        assertTrue("Should contain constructor signature", result.contains("constructor("))
+        assertTrue("Should contain method signature", result.contains("aboutToBeDeleted();"))
+        // 精简后的声明只包含字段和方法签名，不应展开方法体（即没有内部 {）
+        assertEquals("Class declaration should contain only one opening brace", 1, result.count { it == '{' })
+        assertTrue("Class declaration should end with closing brace", result.trimEnd().endsWith("}"))
     }
 }

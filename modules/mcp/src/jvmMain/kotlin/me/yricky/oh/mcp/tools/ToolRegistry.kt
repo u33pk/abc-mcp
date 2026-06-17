@@ -11,6 +11,7 @@ class ToolRegistry(private val sessionManager: SessionManager) {
         register(OpenAbcTool(sessionManager))
         register(ListClassesTool(sessionManager))
         register(GetClassDetailTool(sessionManager))
+        register(ReconstructClassTool(sessionManager))
         register(DecompileClassTool(sessionManager))
         register(DecompileMethodTool(sessionManager))
         register(SearchStringsTool(sessionManager))

@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
  */
 class IteratorOpcodeTest {
 
-    private val es2abc = File("/home/orz/project/unitTest/es2abc")
+    private val es2abc = File("/Users/vv/project/unitTest/es2abc")
 
     private fun compileToAbc(source: String): File {
         val srcFile = File.createTempFile("iter_test_src_", ".js")

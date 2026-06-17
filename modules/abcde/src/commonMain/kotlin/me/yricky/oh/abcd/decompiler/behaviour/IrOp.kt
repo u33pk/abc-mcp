@@ -556,6 +556,21 @@ sealed interface IrOp {
         val parent: FunSimCtx.RegId
     ): Expression {
         override fun read(): Sequence<FunSimCtx.RegId> = sequenceOf(parent)
+
+        /**
+         * 解析 defineclasswithbuffer 的 class literal buffer，缓存方法列表。
+         */
+        val parsedBufferMethods by lazy {
+            me.yricky.oh.abcd.decompiler.structure.reconstruction.ClassLiteralParser.parse(fields)
+        }
+
+        /**
+         * 从 class literal buffer 中识别出的构造器方法。
+         */
+        val constructorMethod by lazy {
+            me.yricky.oh.abcd.decompiler.structure.reconstruction.ClassLiteralParser.findConstructor(parsedBufferMethods)
+                ?: (constructor.method as? me.yricky.oh.abcd.cfm.AbcMethod)
+        }
     }
     class NewInst(val clazz: FunSimCtx.RegId, val constructorArgs: List<FunSimCtx.RegId>): Expression {
         override fun read(): Sequence<FunSimCtx.RegId> {

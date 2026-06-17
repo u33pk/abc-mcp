@@ -11,6 +11,9 @@ import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver.buildLexEnvStac
 import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver.isLexEnvOp
 import me.yricky.oh.abcd.decompiler.structure.lexLvlSlot
 import me.yricky.oh.abcd.decompiler.structure.LexEnvNameResolver.resolveLexName
+import me.yricky.oh.abcd.decompiler.structure.reconstruction.ClassMethod
+import me.yricky.oh.abcd.decompiler.structure.reconstruction.ReconstructedClass
+import me.yricky.oh.abcd.decompiler.structure.statement.ClassDeclaration
 import me.yricky.oh.abcd.decompiler.structure.statement.DoWhileStatement
 import me.yricky.oh.abcd.decompiler.structure.statement.ForInStatement
 import me.yricky.oh.abcd.decompiler.structure.statement.ForOfStatement
@@ -262,6 +265,9 @@ class StructuredToJs(
                 is LinearStatement -> {
                     generateLinearBlock(statement.block, out, indent)
                 }
+                is ClassDeclaration -> {
+                    generateClassDeclaration(statement.clazz, out, indent, depth)
+                }
                 is ForOfStatement -> {
                     out.safeAppend("${indentStr}for (const ${generateRegId(statement.loopVarReg)} of ${generateExpression(statement.iterable)}) {\n")
                     generateRegion(statement.body, out, indent + 1, depth + 1)
@@ -276,6 +282,65 @@ class StructuredToJs(
                     out.safeAppend("${indentStr}// unknown statement type\n")
                 }
             }
+        }
+    }
+
+    /**
+     * 生成重组后的 class 声明。
+     * 仅输出字段声明与 constructor/method 签名，不展开方法体，避免上下文冗余。
+     */
+    private fun generateClassDeclaration(
+        clazz: ReconstructedClass,
+        out: StringBuilder,
+        indent: Int,
+        depth: Int
+    ) {
+        if (depth > 100) {
+            out.safeAppend("${"    ".repeat(indent)}// [class depth limit reached]\n")
+            return
+        }
+        val indentStr = "    ".repeat(indent)
+        val superPart = clazz.superClassName?.let { " extends $it" } ?: ""
+        out.safeAppend("${indentStr}class ${clazz.className}$superPart {\n")
+
+        // 字段
+        for (field in clazz.fields) {
+            out.safeAppend("${indentStr}    ${field.name}: any;\n")
+        }
+        if (clazz.fields.isNotEmpty() && (clazz.constructorMethod != null || clazz.allMethods.isNotEmpty())) {
+            out.safeAppend("\n")
+        }
+
+        val members = mutableListOf<String>()
+        clazz.constructorMethod?.let {
+            members.add("constructor${generateClassMemberSignature(it)};")
+        }
+        for (method in clazz.allMethods) {
+            val staticPrefix = if (method.isStatic) "static " else ""
+            members.add("$staticPrefix${method.name}${generateClassMemberSignature(method.method)};")
+        }
+
+        val firstStaticIndex = members.indexOfFirst { it.startsWith("static ") }
+        for ((index, line) in members.withIndex()) {
+            out.safeAppend("${indentStr}    $line\n")
+            if (index == firstStaticIndex - 1) {
+                out.safeAppend("\n")
+            }
+        }
+
+        out.safeAppend("$indentStr}\n")
+    }
+
+    /**
+     * 生成 class 成员方法的签名，去掉方舟编译器内部传入的 FunctionObject/NewTarget/this。
+     */
+    private fun generateClassMemberSignature(method: AbcMethod): String {
+        val raw = method.argsStr()
+        return when {
+            raw == "(FunctionObject, NewTarget, this)" -> "()"
+            raw.startsWith("(FunctionObject, NewTarget, this, ") ->
+                "(" + raw.removePrefix("(FunctionObject, NewTarget, this, ")
+            else -> raw
         }
     }
 

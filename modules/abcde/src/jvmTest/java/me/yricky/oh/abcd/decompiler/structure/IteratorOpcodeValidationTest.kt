@@ -23,7 +23,7 @@ import java.util.zip.ZipFile
  */
 class IteratorOpcodeValidationTest {
 
-    private val hapDir = File("/home/orz/project/unitTest/hap")
+    private val hapDir = File("/Users/vv/project/unitTest/hap")
     private val sampleSize = 120
 
     private val iteratorOpBytes = setOf(

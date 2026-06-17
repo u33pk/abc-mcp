@@ -1,10 +1,12 @@
 package me.yricky.oh.abcd.decompiler.structure
 
+import me.yricky.oh.abcd.cfm.AbcClass
 import me.yricky.oh.abcd.cfm.AbcMethod
 import me.yricky.oh.abcd.cfm.argsStr
 import me.yricky.oh.abcd.decompiler.CodeSegment
 import me.yricky.oh.abcd.decompiler.ToJs
 import me.yricky.oh.abcd.decompiler.behaviour.IrOp
+import me.yricky.oh.abcd.decompiler.structure.reconstruction.ClassReconstructionPass
 import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.abcd.isa.calledMethods
 import me.yricky.oh.abcd.isa.calledStrings
@@ -104,6 +106,32 @@ object StructuredDecompiler {
     }
 
     /**
+     * 对指定方法执行 class 重组并返回识别出的类（不生成代码）。
+     * 主要用于 MCP 工具在 get_class_detail 中展示 func_main_0 里的 ArkTS class。
+     */
+    fun reconstructClasses(asm: Asm): List<me.yricky.oh.abcd.decompiler.structure.reconstruction.ReconstructedClass> {
+        return try {
+            val codeSegments = CodeSegment.genGraph(asm)
+            val builder = RegionGraphBuilder(codeSegments, asm.code.tryBlocks)
+            val buildResult = builder.build()
+            val analysis = StructureAnalysis(
+                regionGraph = buildResult.graph,
+                entryRegion = buildResult.entry,
+                lastRegion = buildResult.entry
+            )
+            val structuredRegion = analysis.analyze() as Region
+            if (asm.code.method.name == AbcClass.ENTRY_FUNC_NAME) {
+                ClassReconstructionPass.reconstruct(structuredRegion)
+                    .map { it.clazz }
+            } else {
+                emptyList()
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
      * 从 Region 树生成代码
      */
     private fun generateCode(
@@ -111,6 +139,10 @@ object StructuredDecompiler {
         asm: Asm,
         catchHandlers: List<RegionGraphBuilder.CatchHandlerInfo> = emptyList()
     ): String {
+        // 对模块入口函数 func_main_0 执行 class 重组
+        if (asm.code.method.name == AbcClass.ENTRY_FUNC_NAME) {
+            ClassReconstructionPass.reconstruct(region)
+        }
         val generator = StructuredToJs(asm, catchHandlers)
         return generator.generate(region)
     }

@@ -1,5 +1,7 @@
 # ArkTS Class 重组调研与实现规划
 
+> 状态：**已实现**。核心代码位于 `modules/abcde/src/commonMain/kotlin/me/yricky/oh/abcd/decompiler/structure/reconstruction/`，MCP 工具 `reconstruct_class` 已可用。
+
 ## 1. 背景与问题
 
 当前 MCP 的 `get_class_detail` 工具返回的是 **ABC 文件中的顶层 `AbcClass` 信息**。但在 ArkCompiler 的编译模型里，一个 `.ets` 源文件本身被编译成一个模块记录（module record），而文件内部定义的 `class` / `struct` / `@Component` 并不是顶层 `AbcClass`，而是被编码在模块入口函数 `func_main_0` 内部的 `defineclasswithbuffer` 指令里。

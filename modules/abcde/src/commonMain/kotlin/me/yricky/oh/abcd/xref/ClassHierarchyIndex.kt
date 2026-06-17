@@ -169,7 +169,7 @@ class ClassHierarchyIndex private constructor(
         /**
          * 从寄存器出发，尝试解析出类名（与 XRefIndex 中逻辑一致）。
          */
-        private fun resolveClassName(
+        internal fun resolveClassName(
             regId: FunSimCtx.RegId,
             regMap: Map<FunSimCtx.RegId, IrOp.Expression>,
             visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()
@@ -181,7 +181,7 @@ class ClassHierarchyIndex private constructor(
         /**
          * 从表达式出发，尝试解析出类名。
          */
-        private fun resolveClassName(
+        internal fun resolveClassName(
             expr: IrOp.Expression?,
             regMap: Map<FunSimCtx.RegId, IrOp.Expression>,
             visited: MutableSet<FunSimCtx.RegId> = mutableSetOf()

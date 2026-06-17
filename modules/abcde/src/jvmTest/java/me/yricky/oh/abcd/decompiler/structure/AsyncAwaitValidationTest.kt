@@ -22,7 +22,7 @@ import java.util.zip.ZipFile
  */
 class AsyncAwaitValidationTest {
 
-    private val hapDir = File("/home/orz/project/unitTest/hap")
+    private val hapDir = File("/Users/vv/project/unitTest/hap")
 
     private fun forEachAbc(action: (hap: File, entryName: String, abc: AbcBuf) -> Unit) {
         val hapFiles = hapDir.listFiles { f -> f.extension == "hap" } ?: emptyArray()

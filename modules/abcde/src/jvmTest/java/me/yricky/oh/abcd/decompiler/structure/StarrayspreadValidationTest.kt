@@ -18,7 +18,7 @@ import java.util.zip.ZipFile
  */
 class StarrayspreadValidationTest {
 
-    private val hapDir = File("/home/orz/project/unitTest/hap")
+    private val hapDir = File("/Users/vv/project/unitTest/hap")
 
     @Test
     fun `scan all haps for starrayspread methods`() {
