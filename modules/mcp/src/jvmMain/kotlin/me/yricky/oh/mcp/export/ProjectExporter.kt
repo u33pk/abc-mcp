@@ -1,5 +1,8 @@
 package me.yricky.oh.mcp.export
 
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.*
 import me.yricky.oh.abcd.AbcBuf
 import me.yricky.oh.abcd.cfm.AbcClass
@@ -13,6 +16,8 @@ import me.yricky.oh.abcd.isa.Asm
 import me.yricky.oh.abcd.xref.ClassHierarchyIndex
 import me.yricky.oh.abcd.xref.ClassNameResolver
 import java.io.File
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * ABC 工程批量导出器。
@@ -23,6 +28,8 @@ import java.io.File
  * - `metadata/project.json`：导出统计与文件映射。
  * - `metadata/hierarchy.json`：类层次结构。
  * - `metadata/errors.json`：导出过程中出现的错误与降级信息。
+ *
+ * 方法体反编译默认使用协程并行，以加速大工程导出。
  */
 object ProjectExporter {
 
@@ -36,10 +43,14 @@ object ProjectExporter {
         val methodBodyLimit: Int = Int.MAX_VALUE,
         val writeHierarchy: Boolean = true,
         val writeErrors: Boolean = true,
-        /** 是否以全量模式反编译方法体（导出到文件时建议开启，可绕过 1000 指令早期退出和 1MB 输出预算） */
+        /** 是否以全量模式反编译方法体（导出到文件时建议开启） */
         val fullDecompile: Boolean = false,
         /** 全量模式下的单方法输出字符上限，默认 50MB */
-        val maxOutputChars: Int = StructuredToJs.MAX_EXPORT_OUTPUT_SIZE
+        val maxOutputChars: Int = StructuredToJs.MAX_EXPORT_OUTPUT_SIZE,
+        /** 是否并行反编译方法体 */
+        val parallelDecompile: Boolean = true,
+        /** 并行反编译的最大并发数，默认 CPU 核心数 */
+        val maxConcurrency: Int = Runtime.getRuntime().availableProcessors()
     )
 
     /**
@@ -80,16 +91,22 @@ object ProjectExporter {
      */
     fun export(abcFiles: List<AbcBuf>, outputRoot: File, config: Config = Config()): Result {
         require(abcFiles.isNotEmpty()) { "abcFiles must not be empty" }
+        return runBlocking(Dispatchers.Default) {
+            exportSuspend(abcFiles, outputRoot, config)
+        }
+    }
+
+    private suspend fun exportSuspend(abcFiles: List<AbcBuf>, outputRoot: File, config: Config): Result {
         outputRoot.mkdirs()
         val srcRoot = File(outputRoot, SRC_DIR).apply { mkdirs() }
         val methodsRoot = File(outputRoot, METHODS_DIR)
         val metaRoot = File(outputRoot, META_DIR).apply { mkdirs() }
 
-        val errors = mutableListOf<ExportError>()
-        val sourceFiles = mutableSetOf<String>()
-        val methodFiles = mutableSetOf<String>()
-        var classCount = 0
-        var methodCount = 0
+        val errors = ConcurrentLinkedQueue<ExportError>()
+        val sourceFiles = ConcurrentLinkedQueue<String>()
+        val methodFiles = ConcurrentLinkedQueue<String>()
+        val classCount = AtomicInteger()
+        val methodCount = AtomicInteger()
 
         val hierarchies = mutableListOf<Pair<AbcBuf, ClassHierarchyIndex>>()
 
@@ -97,8 +114,12 @@ object ProjectExporter {
             methodsRoot.mkdirs()
         }
 
+        // 第一阶段：串行处理每个 ABC 的 class 签名、类层次结构索引、并收集方法体任务
+        val methodTasks = mutableListOf<MethodTask>()
+
         for (abc in abcFiles) {
             val abcTag = abcShortTag(abc)
+
             val abcHierarchy = runCatching { ClassHierarchyIndex.build(abc) }
                 .getOrElse { e ->
                     errors.add(ExportError("hierarchy_build_failed", abc.tag, null, e.message ?: "unknown"))
@@ -106,7 +127,6 @@ object ProjectExporter {
                 }
             abcHierarchy?.let { hierarchies.add(abc to it) }
 
-            // className -> list of reconstructed classes (from func_main_0)
             val reconstructedByModule = mutableMapOf<String, MutableList<ReconstructedClass>>()
 
             for (classItem in abc.classes.values.filterIsInstance<AbcClass>()) {
@@ -123,132 +143,170 @@ object ProjectExporter {
                 }
 
                 if (reconstructed.isNotEmpty()) {
-                    classCount += reconstructed.size
+                    classCount.addAndGet(reconstructed.size)
                     reconstructedByModule.getOrPut(moduleName) { mutableListOf() }.addAll(reconstructed)
                 }
-            }
 
-            // 按模块类写入源文件（class 签名）
-            for ((moduleName, classes) in reconstructedByModule) {
-                val moduleClass = abc.classes.values.filterIsInstance<AbcClass>().find { it.name == moduleName }
-                if (moduleClass == null) {
-                    errors.add(ExportError("module_class_missing", "$abcTag/$moduleName", null, "Cannot find module class"))
-                    continue
-                }
-
-                val relativePath = SourcePathResolver.resolve(moduleClass)
-                val targetFile = File(srcRoot, relativePath)
-                targetFile.parentFile?.mkdirs()
-
-                val classBlock = buildString {
-                    classes.forEachIndexed { index, clazz ->
-                        if (index > 0) appendLine()
-                        appendLine("// Class: ${clazz.className}")
-                        if (clazz.superClassName != null) {
-                            appendLine("// Super: ${clazz.superClassName}")
-                        }
-                        append(ReconstructedClassRenderer.render(clazz))
-                        appendLine()
-                    }
-                }
-
-                runCatching {
-                    if (targetFile.exists()) {
-                        // 多个 ABC 出现同名源文件时追加，而不是覆盖
-                        targetFile.appendText(buildString {
-                            appendLine()
-                            appendLine("// --- Additional ABC: $abcTag ---")
-                            appendLine("// Module class: $moduleName")
-                            append(classBlock)
-                        })
-                    } else {
-                        targetFile.writeText(buildString {
-                            appendLine("// Source: $relativePath")
-                            appendLine("// ABC: $abcTag")
-                            appendLine("// Module class: $moduleName")
-                            appendLine()
-                            append(classBlock)
-                        })
-                    }
-                    sourceFiles.add("$SRC_DIR/$relativePath")
-                }.onFailure { e ->
-                    errors.add(ExportError("write_source_failed", "$abcTag/$moduleName", null, e.message ?: "unknown"))
-                }
-            }
-
-            // 导出方法体
-            if (config.includeMethodBodies) {
-                for (classItem in abc.classes.values.filterIsInstance<AbcClass>()) {
-                    val moduleName = classItem.name
+                if (config.includeMethodBodies) {
                     val classDirName = sanitizeDirName(ClassNameResolver.normalizeClassName(moduleName).ifBlank { moduleName })
-                    val classMethodsRoot = File(methodsRoot, "$abcTag/$classDirName").apply { mkdirs() }
-
+                    val classMethodsRoot = File(methodsRoot, "$abcTag/$classDirName")
                     for (method in classItem.methods) {
-                        methodCount++
-
-                        val decodedName = decodeMethodName(method)
-                        val safeName = sanitizeFileName(decodedName)
-                        val methodFileName = generateUniqueFileName(classMethodsRoot, safeName, "js")
-                        val targetFile = File(classMethodsRoot, methodFileName)
-
-                        val body = runCatching {
-                            val code = method.codeItem
-                            if (code != null) {
-                                val asm = Asm(code)
-                                if (config.fullDecompile) {
-                                    val result = StructuredDecompiler.decompileFull(asm, config.maxOutputChars)
-                                    if (!result.success) {
-                                        errors.add(ExportError("decompile_truncated", "$abcTag/$moduleName", decodedName, "output exceeded ${config.maxOutputChars} chars"))
-                                    }
-                                    result.code
-                                } else {
-                                    StructuredDecompiler.decompile(asm, 0, config.methodBodyLimit)
-                                }
-                            } else {
-                                "// No code (abstract/native)\n"
-                            }
-                        }.getOrElse { e ->
-                            errors.add(ExportError("decompile_failed", "$abcTag/$moduleName", decodedName, e.message ?: "unknown"))
-                            "// Error decompiling ${method.name}: ${e.message}\n"
-                        }
-
-                        val content = buildString {
-                            appendLine("// ABC: $abcTag")
-                            appendLine("// Class: $moduleName")
-                            appendLine("// Method: $decodedName")
-                            appendLine("// Original: ${method.name}")
-                            appendLine()
-                            append(body)
-                        }
-
-                        runCatching {
-                            targetFile.writeText(content)
-                            methodFiles.add("$METHODS_DIR/$abcTag/$classDirName/$methodFileName")
-                        }.onFailure { e ->
-                            errors.add(ExportError("write_method_failed", "$abcTag/$moduleName", decodedName, e.message ?: "unknown"))
-                        }
+                        methodTasks.add(MethodTask(abc, abcTag, moduleName, method, classMethodsRoot, config))
                     }
                 }
+            }
+
+            // 写入源文件（class 签名）— 串行，避免同名源文件追加冲突
+            for ((moduleName, classes) in reconstructedByModule) {
+                writeSourceFile(abc, abcTag, moduleName, classes, srcRoot, sourceFiles, errors)
             }
         }
 
-        // 写入元数据
-        writeProjectMetadata(metaRoot, abcFiles, sourceFiles.toList(), methodFiles.toList(), classCount, methodCount, errors)
+        methodCount.addAndGet(methodTasks.size)
+
+        // 第二阶段：并行反编译并写入方法体
+        if (methodTasks.isNotEmpty()) {
+            val semaphore = Semaphore(config.maxConcurrency)
+            coroutineScope {
+                methodTasks.map { task ->
+                    async {
+                        semaphore.withPermit {
+                            writeMethodFile(task, methodFiles, errors)
+                        }
+                    }
+                }.awaitAll()
+            }
+        }
+
+        // 第三阶段：写入元数据
+        writeProjectMetadata(metaRoot, abcFiles, sourceFiles.sorted(), methodFiles.sorted(), classCount.get(), methodCount.get(), errors.sortedBy { it.toString() })
         if (config.writeHierarchy && hierarchies.isNotEmpty()) {
             writeHierarchyMetadata(metaRoot, hierarchies)
         }
         if (config.writeErrors) {
-            writeErrorsMetadata(metaRoot, errors)
+            writeErrorsMetadata(metaRoot, errors.sortedBy { it.toString() })
         }
 
         return Result(
             outputRoot = outputRoot,
-            sourceFiles = sourceFiles.toList(),
-            methodFiles = methodFiles.toList(),
-            errors = errors,
-            classCount = classCount,
-            methodCount = methodCount
+            sourceFiles = sourceFiles.sorted(),
+            methodFiles = methodFiles.sorted(),
+            errors = errors.sortedBy { it.toString() },
+            classCount = classCount.get(),
+            methodCount = methodCount.get()
         )
+    }
+
+    private fun writeSourceFile(
+        abc: AbcBuf,
+        abcTag: String,
+        moduleName: String,
+        classes: List<ReconstructedClass>,
+        srcRoot: File,
+        sourceFiles: ConcurrentLinkedQueue<String>,
+        errors: ConcurrentLinkedQueue<ExportError>
+    ) {
+        val moduleClass = abc.classes.values.filterIsInstance<AbcClass>().find { it.name == moduleName }
+        if (moduleClass == null) {
+            errors.add(ExportError("module_class_missing", "$abcTag/$moduleName", null, "Cannot find module class"))
+            return
+        }
+
+        val relativePath = SourcePathResolver.resolve(moduleClass)
+        val targetFile = File(srcRoot, relativePath)
+        targetFile.parentFile?.mkdirs()
+
+        val classBlock = buildString {
+            classes.forEachIndexed { index, clazz ->
+                if (index > 0) appendLine()
+                appendLine("// Class: ${clazz.className}")
+                if (clazz.superClassName != null) {
+                    appendLine("// Super: ${clazz.superClassName}")
+                }
+                append(ReconstructedClassRenderer.render(clazz))
+                appendLine()
+            }
+        }
+
+        runCatching {
+            if (targetFile.exists()) {
+                targetFile.appendText(buildString {
+                    appendLine()
+                    appendLine("// --- Additional ABC: $abcTag ---")
+                    appendLine("// Module class: $moduleName")
+                    append(classBlock)
+                })
+            } else {
+                targetFile.writeText(buildString {
+                    appendLine("// Source: $relativePath")
+                    appendLine("// ABC: $abcTag")
+                    appendLine("// Module class: $moduleName")
+                    appendLine()
+                    append(classBlock)
+                })
+            }
+            sourceFiles.add("$SRC_DIR/$relativePath")
+        }.onFailure { e ->
+            errors.add(ExportError("write_source_failed", "$abcTag/$moduleName", null, e.message ?: "unknown"))
+        }
+    }
+
+    private data class MethodTask(
+        val abc: AbcBuf,
+        val abcTag: String,
+        val moduleName: String,
+        val method: me.yricky.oh.abcd.cfm.AbcMethod,
+        val classMethodsRoot: File,
+        val config: Config
+    )
+
+    private suspend fun writeMethodFile(
+        task: MethodTask,
+        methodFiles: ConcurrentLinkedQueue<String>,
+        errors: ConcurrentLinkedQueue<ExportError>
+    ) = withContext(Dispatchers.IO) {
+        val decodedName = decodeMethodName(task.method)
+        val safeName = sanitizeFileName(decodedName)
+        task.classMethodsRoot.mkdirs()
+        val methodFileName = generateUniqueFileName(task.classMethodsRoot, safeName, "js")
+        val targetFile = File(task.classMethodsRoot, methodFileName)
+
+        val body = runCatching {
+            val code = task.method.codeItem
+            if (code != null) {
+                val asm = Asm(code)
+                if (task.config.fullDecompile) {
+                    val result = StructuredDecompiler.decompileFull(asm, task.config.maxOutputChars)
+                    if (!result.success) {
+                        errors.add(ExportError("decompile_truncated", "${task.abcTag}/${task.moduleName}", decodedName, "output exceeded ${task.config.maxOutputChars} chars"))
+                    }
+                    result.code
+                } else {
+                    StructuredDecompiler.decompile(asm, 0, task.config.methodBodyLimit)
+                }
+            } else {
+                "// No code (abstract/native)\n"
+            }
+        }.getOrElse { e ->
+            errors.add(ExportError("decompile_failed", "${task.abcTag}/${task.moduleName}", decodedName, e.message ?: "unknown"))
+            "// Error decompiling ${task.method.name}: ${e.message}\n"
+        }
+
+        val content = buildString {
+            appendLine("// ABC: ${task.abcTag}")
+            appendLine("// Class: ${task.moduleName}")
+            appendLine("// Method: $decodedName")
+            appendLine("// Original: ${task.method.name}")
+            appendLine()
+            append(body)
+        }
+
+        runCatching {
+            targetFile.writeText(content)
+            methodFiles.add("$METHODS_DIR/${task.classMethodsRoot.relativeTo(File(task.classMethodsRoot.parentFile?.parentFile, ""))}/$methodFileName")
+        }.onFailure { e ->
+            errors.add(ExportError("write_method_failed", "${task.abcTag}/${task.moduleName}", decodedName, e.message ?: "unknown"))
+        }
     }
 
     private fun writeProjectMetadata(

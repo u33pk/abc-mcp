@@ -90,4 +90,46 @@ class ExportProjectToolTest {
 
         outputDir.deleteRecursively()
     }
+
+    @Test
+    fun `export project from hap includes resources by default`() {
+        val outputDir = createTempDirectory("export_project_hap_res_test_").toFile()
+        outputDir.deleteRecursively()
+
+        val tool = ExportProjectTool(SessionManager())
+        val result = tool.execute(
+            buildJsonObject {
+                put("path", hapPath)
+                put("output_dir", outputDir.absolutePath)
+                put("include_method_bodies", false)
+            }
+        )
+
+        assertTrue("should report success", result.startsWith("Export completed:"))
+        assertTrue("res dir should exist", File(outputDir, "res").exists())
+        assertTrue("resources.json should exist", File(outputDir, "metadata/resources.json").exists())
+
+        outputDir.deleteRecursively()
+    }
+
+    @Test
+    fun `export project from hap can skip resources`() {
+        val outputDir = createTempDirectory("export_project_hap_no_res_test_").toFile()
+        outputDir.deleteRecursively()
+
+        val tool = ExportProjectTool(SessionManager())
+        val result = tool.execute(
+            buildJsonObject {
+                put("path", hapPath)
+                put("output_dir", outputDir.absolutePath)
+                put("include_method_bodies", false)
+                put("include_resources", false)
+            }
+        )
+
+        assertTrue("should report success", result.startsWith("Export completed:"))
+        assertFalse("res dir should not exist", File(outputDir, "res").exists())
+
+        outputDir.deleteRecursively()
+    }
 }

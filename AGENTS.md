@@ -376,11 +376,13 @@ _acc_ = AtkTsGlobal.print(_acc_);
     - 待扩展：跨 ABC 文件 xref 聚合（多 ABC HAP）；类型标注引用
 28. **`export_project` 批量导出** ✅
     - 新增 `SourcePathResolver`：优先从方法 debug info 的 `SetFile` 记录提取真实源文件路径（`entry|entry|version|src/main/ets/...`），缺失时回退到类名推断
-    - 新增 `ProjectExporter`：将单个/多个 ABC 导出为工程目录，包含 `src/`（重组 class 签名，按源文件路径组织）、`methods/`（每个方法的反编译体单独文件，多 ABC 时以 ABC 名前缀区分）、`metadata/project.json`（统计与文件映射）、`metadata/hierarchy.json`（类层次结构）、`metadata/errors.json`（错误日志）
+    - 新增 `ProjectExporter`：将单个/多个 ABC 导出为工程目录，包含 `src/`（重组 class 签名）、`methods/`（每个方法的反编译体，多 ABC 时以 ABC 名前缀区分）、`metadata/project.json`、`metadata/hierarchy.json`、`metadata/errors.json`
     - 新增 `HapAbcExtractor`：从 HAP 包中提取所有 ABC，与 `open_hap` 保持一致的 `{hap}_abc/` 提取目录
     - 新增 `StructuredDecompiler.decompileFull()`：绕过 1000 指令早期退出和 1MB 输出预算，单方法默认 50MB 上限，导出到文件时启用
-    - 新增 `export_project` MCP tool，支持 `path`（ABC/HAP 自动识别）、`output_dir`、`include_method_bodies`、`full_decompile`、`max_output_chars` 参数；HAP 默认输出到 `{HAP}_exported`
-    - 新增 `HapAbcExtractorTest`、`ExportProjectToolTest`（含 HAP 路径与全量反编译）单元测试
+    - 新增 `HapResourceExporter`：从 HAP 导出资源，值资源写入 `res/values/{qualifier}.json`，媒体/原始文件从 zip 复制到 `res/{type}/{qualifier}/{fileName}`，并生成 `metadata/resources.json`
+    - `ProjectExporter` 方法体反编译改为协程并行（`Dispatchers.Default` + `Semaphore`），并发数默认 CPU 核心数，源文件写入仍串行以避免同名冲突
+    - 新增 `export_project` MCP tool，支持 `path`（ABC/HAP 自动识别）、`output_dir`、`include_method_bodies`、`full_decompile`、`max_output_chars`、`include_resources`、`parallel_decompile`、`max_concurrency` 参数；HAP 默认输出到 `{HAP}_exported`
+    - 新增 `HapAbcExtractorTest`、`HapResourceExporterTest`、`ExportProjectToolTest`（含 HAP 路径、全量反编译、资源导出/跳过）单元测试
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）

@@ -3,6 +3,7 @@ package me.yricky.oh.mcp.tools
 import kotlinx.serialization.json.*
 import me.yricky.oh.abcd.AbcBuf
 import me.yricky.oh.mcp.export.HapAbcExtractor
+import me.yricky.oh.mcp.export.HapResourceExporter
 import me.yricky.oh.mcp.export.ProjectExporter
 import me.yricky.oh.mcp.session.SessionManager
 import java.io.File
@@ -13,16 +14,18 @@ import java.io.File
  * 输出结构：
  * - `src/`：按源文件路径组织的 class 签名。
  * - `methods/`：每个方法的反编译体（单独文件）。
+ * - `res/`：HAP 资源（值资源 + 媒体/原始文件），HAP 导出时默认生成。
  * - `metadata/project.json`：导出统计与文件映射。
  * - `metadata/hierarchy.json`：类层次结构。
  * - `metadata/errors.json`：错误日志。
+ * - `metadata/resources.json`：资源导出摘要（HAP 导出时）。
  *
- * 支持直接传入 `.hap` 文件，会自动提取所有 ABC 后合并导出。
+ * 支持直接传入 `.hap` 文件，会自动提取所有 ABC 并合并导出。
  */
 class ExportProjectTool(private val sessionManager: SessionManager) : Tool {
 
     override val name = "export_project"
-    override val description = "将 ABC/HAP 批量导出为可读工程目录（class 签名 + 方法体 + 元数据）。"
+    override val description = "将 ABC/HAP 批量导出为可读工程目录（class 签名 + 方法体 + 资源 + 元数据）。"
     override val inputSchema = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
@@ -46,6 +49,18 @@ class ExportProjectTool(private val sessionManager: SessionManager) : Tool {
                 put("type", "integer")
                 put("description", "单方法最大输出字符数，默认 50MB")
             }
+            putJsonObject("include_resources") {
+                put("type", "boolean")
+                put("description", "HAP 导出时是否导出资源，默认 true")
+            }
+            putJsonObject("parallel_decompile") {
+                put("type", "boolean")
+                put("description", "是否并行反编译方法体，默认 true")
+            }
+            putJsonObject("max_concurrency") {
+                put("type", "integer")
+                put("description", "并行反编译最大并发数，默认 CPU 核心数")
+            }
         }
         putJsonArray("required") {
             add(JsonPrimitive("path"))
@@ -62,6 +77,10 @@ class ExportProjectTool(private val sessionManager: SessionManager) : Tool {
         val fullDecompile = args["full_decompile"]?.jsonPrimitive?.booleanOrNull ?: true
         val maxOutputChars = args["max_output_chars"]?.jsonPrimitive?.intOrNull
             ?: me.yricky.oh.abcd.decompiler.structure.StructuredToJs.MAX_EXPORT_OUTPUT_SIZE
+        val includeResources = args["include_resources"]?.jsonPrimitive?.booleanOrNull ?: true
+        val parallelDecompile = args["parallel_decompile"]?.jsonPrimitive?.booleanOrNull ?: true
+        val maxConcurrency = args["max_concurrency"]?.jsonPrimitive?.intOrNull
+            ?: Runtime.getRuntime().availableProcessors()
 
         val root = if (outputDir.isNullOrBlank()) {
             File(file.parentFile, "${file.nameWithoutExtension}_exported")
@@ -91,9 +110,15 @@ class ExportProjectTool(private val sessionManager: SessionManager) : Tool {
             config = ProjectExporter.Config(
                 includeMethodBodies = includeBodies,
                 fullDecompile = fullDecompile,
-                maxOutputChars = maxOutputChars
+                maxOutputChars = maxOutputChars,
+                parallelDecompile = parallelDecompile,
+                maxConcurrency = maxConcurrency
             )
         )
+
+        val resourceResult = if (inputType == "HAP" && includeResources) {
+            HapResourceExporter.export(file, root)
+        } else null
 
         return buildString {
             appendLine("Export completed: ${root.absolutePath}")
@@ -104,6 +129,14 @@ class ExportProjectTool(private val sessionManager: SessionManager) : Tool {
             appendLine("  classes: ${result.classCount}")
             appendLine("  methods: ${result.methodCount}")
             appendLine("  errors: ${result.errors.size}")
+            if (resourceResult != null) {
+                appendLine("  resource value files: ${resourceResult.valueFiles.size}")
+                appendLine("  resource file assets: ${resourceResult.fileResources.size}")
+                appendLine("  resource qualifiers: ${resourceResult.qualifierCount}")
+                if (resourceResult.errors.isNotEmpty()) {
+                    appendLine("  resource errors: ${resourceResult.errors.size}")
+                }
+            }
             if (result.errors.isNotEmpty()) {
                 appendLine()
                 appendLine("Errors:")
