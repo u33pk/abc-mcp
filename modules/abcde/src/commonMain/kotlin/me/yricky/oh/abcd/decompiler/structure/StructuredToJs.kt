@@ -75,14 +75,17 @@ class OutputTooLargeException(
  */
 class StructuredToJs(
     val asm: Asm,
-    private val catchHandlers: List<RegionGraphBuilder.CatchHandlerInfo> = emptyList()
+    private val catchHandlers: List<RegionGraphBuilder.CatchHandlerInfo> = emptyList(),
+    private val maxOutputSize: Int = MAX_TOTAL_OUTPUT_SIZE
 ) {
     /** 跟踪上一个基本块的活跃 try 集合，用于 try 注释去重 */
     private var previousActiveTryBlocks: List<TryBlock> = emptyList()
 
     companion object {
-        /** 单个方法反编译输出的最大字符数（10 MB） */
-        const val MAX_TOTAL_OUTPUT_SIZE = 1 * 1024 * 1024  // 1 MB — 超出此预算的方法通过早期检测直接返回摘要
+        /** 交互式反编译输出的默认最大字符数（1 MB） */
+        const val MAX_TOTAL_OUTPUT_SIZE = 1 * 1024 * 1024
+        /** 导出到文件时的默认最大字符数（50 MB） */
+        const val MAX_EXPORT_OUTPUT_SIZE = 50 * 1024 * 1024
         /** 字面量数组/对象最多完整展示的元素/键值对数量 */
         const val MAX_LITERAL_ARRAY_SIZE = 1000
     }
@@ -111,7 +114,7 @@ class StructuredToJs(
      * 检查继续追加 [additional] 个字符是否会超过预算
      */
     private fun checkBudget(additional: Int) {
-        if (outputSize + additional > MAX_TOTAL_OUTPUT_SIZE) {
+        if (outputSize + additional > maxOutputSize) {
             throw OutputTooLargeException(outputSize)
         }
     }

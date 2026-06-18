@@ -11,6 +11,7 @@ import kotlin.io.path.createTempDirectory
 class ExportProjectToolTest {
 
     private val abcPath = "/Users/vv/project/unitTest/out/defineclasswithbuffer_dynamic.abc"
+    private val hapPath = "/Users/vv/project/unitTest/hap/yingshilian-HM.hap"
 
     @Test
     fun `export project creates source and method files`() {
@@ -62,6 +63,30 @@ class ExportProjectToolTest {
         assertTrue("should report success", result.startsWith("Export completed:"))
         assertTrue("src dir should exist", File(outputDir, "src").exists())
         assertFalse("methods dir should not exist", File(outputDir, "methods").exists())
+
+        outputDir.deleteRecursively()
+    }
+
+    @Test
+    fun `export project from hap merges all abc`() {
+        val outputDir = createTempDirectory("export_project_hap_test_").toFile()
+        outputDir.deleteRecursively()
+
+        val tool = ExportProjectTool(SessionManager())
+        val result = tool.execute(
+            buildJsonObject {
+                put("path", hapPath)
+                put("output_dir", outputDir.absolutePath)
+                put("include_method_bodies", true)
+                put("full_decompile", true)
+            }
+        )
+
+        assertTrue("should report success", result.startsWith("Export completed:"))
+        assertTrue("result should mention HAP", result.contains("input type: HAP"))
+        assertTrue("src dir should exist", File(outputDir, "src").exists())
+        assertTrue("methods dir should exist", File(outputDir, "methods").exists())
+        assertTrue("project.json should exist", File(outputDir, "metadata/project.json").exists())
 
         outputDir.deleteRecursively()
     }

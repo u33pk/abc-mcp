@@ -193,6 +193,60 @@ object StructuredDecompiler {
     }
 
     /**
+     * 全量反编译，用于导出到文件场景。
+     *
+     * 不限制指令数，也不做行数分页；仅通过 [maxOutputSize] 控制总输出字符上限，
+     * 避免极端方法把内存撑爆。超出预算时返回已生成内容并附带截断标记。
+     */
+    fun decompileFull(
+        asm: Asm,
+        maxOutputSize: Int = StructuredToJs.MAX_EXPORT_OUTPUT_SIZE
+    ): DecompileResult {
+        return try {
+            val codeSegments = CodeSegment.genGraph(asm)
+            val builder = RegionGraphBuilder(codeSegments, asm.code.tryBlocks)
+            val buildResult = builder.build()
+
+            val analysis = StructureAnalysis(
+                regionGraph = buildResult.graph,
+                entryRegion = buildResult.entry,
+                lastRegion = buildResult.entry
+            )
+            val structuredRegion = analysis.analyze()
+
+            val fullOutput = generateCode(
+                structuredRegion as Region,
+                asm,
+                buildResult.catchHandlers,
+                maxOutputSize
+            )
+            DecompileResult(
+                success = true,
+                code = fullOutput,
+                regionCount = buildResult.graph.nodes.size,
+                method = "structured_full"
+            )
+        } catch (e: OutputTooLargeException) {
+            DecompileResult(
+                success = false,
+                code = buildString {
+                    appendLine("// [method output truncated at ${e.generatedChars} chars]")
+                    append(e.partialOutput ?: "")
+                },
+                regionCount = 0,
+                method = "truncated_full"
+            )
+        } catch (e: Exception) {
+            DecompileResult(
+                success = false,
+                code = "// Error: ${e.message}",
+                regionCount = 0,
+                method = "error_full"
+            )
+        }
+    }
+
+    /**
      * 对指定方法执行 class 重组并返回识别出的类（不生成代码）。
      * 主要用于 MCP 工具在 get_class_detail 中展示 func_main_0 里的 ArkTS class。
      */
@@ -224,13 +278,14 @@ object StructuredDecompiler {
     private fun generateCode(
         region: Region,
         asm: Asm,
-        catchHandlers: List<RegionGraphBuilder.CatchHandlerInfo> = emptyList()
+        catchHandlers: List<RegionGraphBuilder.CatchHandlerInfo> = emptyList(),
+        maxOutputSize: Int = StructuredToJs.MAX_TOTAL_OUTPUT_SIZE
     ): String {
         // 对模块入口函数 func_main_0 执行 class 重组
         if (asm.code.method.name == AbcClass.ENTRY_FUNC_NAME) {
             ClassReconstructionPass.reconstruct(region)
         }
-        val generator = StructuredToJs(asm, catchHandlers)
+        val generator = StructuredToJs(asm, catchHandlers, maxOutputSize)
         return generator.generate(region)
     }
 
