@@ -100,7 +100,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 ### 入口
 `me.yricky.oh.mcp.MainKt`
 
-### 暴露的 Tools（19 个）
+### 暴露的 Tools（20 个）
 
 #### ABC 字节码工具
 | Tool | 功能 |
@@ -118,6 +118,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 | `get_xrefs_to_class` | 查找类的实例化位置、`instanceof` 检查位置与模块引用位置（交叉引用） |
 | `get_class_hierarchy` | 查询类的父类、接口、子类与接口实现者 |
 | `search_in_method` | 在方法体内按正则搜索反汇编文本，返回匹配行及上下文 |
+| `export_project` | 批量导出 ABC 为工程目录（`src/` class 签名 + `methods/` 方法体 + 元数据） |
 
 #### HAP 包工具
 | Tool | 功能 |
@@ -373,6 +374,11 @@ _acc_ = AtkTsGlobal.print(_acc_);
     - ✅ 所有 xref 相关工具统一使用 `findClassByName`，支持路径格式类名
     - ✅ 修复测试路径：`CrossModuleXRefTest`/`XRefIndexTest` 改为本机路径，新增 `XRefModuleRefTest` 验证模块引用
     - 待扩展：跨 ABC 文件 xref 聚合（多 ABC HAP）；类型标注引用
+28. **`export_project` 批量导出** ✅
+    - 新增 `SourcePathResolver`：优先从方法 debug info 的 `SetFile` 记录提取真实源文件路径（`entry|entry|version|src/main/ets/...`），缺失时回退到类名推断
+    - 新增 `ProjectExporter`：将单个 ABC 导出为工程目录，包含 `src/`（重组 class 签名，按源文件路径组织）、`methods/`（每个方法的反编译体单独文件）、`metadata/project.json`（统计与文件映射）、`metadata/hierarchy.json`（类层次结构）、`metadata/errors.json`（错误日志）
+    - 新增 `export_project` MCP tool，支持 `path`、`output_dir`、`include_method_bodies` 参数；默认输出到 `{ABC}_exported`
+    - 新增 `ExportProjectToolTest` 单元测试
 
 ### 已修复
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）
