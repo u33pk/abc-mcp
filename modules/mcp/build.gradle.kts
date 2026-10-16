@@ -1,3 +1,5 @@
+import java.nio.file.Files
+
 plugins {
     kotlin("multiplatform")
     kotlin("plugin.serialization")
@@ -55,5 +57,13 @@ tasks.register<Jar>("fatJar") {
 
     manifest {
         attributes["Main-Class"] = "me.yricky.oh.mcp.MainKt"
+    }
+
+    // 固定名称符号链接，供 MCP 客户端配置（mcp.json）稳定引用，避免版本号变化导致指向旧 jar
+    doLast {
+        val link = File(destinationDirectory.get().asFile, "abcde-mcp-fat.jar")
+        val target = archiveFile.get().asFile
+        link.delete()
+        Files.createSymbolicLink(link.toPath(), target.toPath())
     }
 }

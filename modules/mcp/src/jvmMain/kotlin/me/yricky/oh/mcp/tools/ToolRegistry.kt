@@ -22,6 +22,8 @@ class ToolRegistry(private val sessionManager: SessionManager) {
         register(GetClassHierarchyTool(sessionManager))
         register(SearchInMethodTool(sessionManager))
         register(ExportProjectTool(sessionManager))
+        register(ListSessionsTool(sessionManager))
+        register(CloseAbcTool(sessionManager))
         // HAP tools
         register(OpenHapTool())
         register(GetHapManifestTool())

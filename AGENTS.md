@@ -100,7 +100,7 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 ### 入口
 `me.yricky.oh.mcp.MainKt`
 
-### 暴露的 Tools（20 个）
+### 暴露的 Tools（22 个）
 
 #### ABC 字节码工具
 | Tool | 功能 |
@@ -119,6 +119,8 @@ src/commonMain/kotlin/me/yricky/oh/abcd/
 | `get_class_hierarchy` | 查询类的父类、接口、子类与接口实现者 |
 | `search_in_method` | 在方法体内按正则搜索反汇编文本，返回匹配行及上下文 |
 | `export_project` | 批量导出 ABC/HAP 为工程目录（`src/` class 签名 + `methods/` 方法体 + 元数据）；支持 `.hap` 自动提取所有 ABC 并合并导出；支持 `full_decompile` 绕过 1000 指令/1MB 限制 |
+| `list_sessions` | 列出所有打开的 ABC 会话（路径、类数量、已缓存的 xref/类层次索引），辅助长会话内存管理 |
+| `close_abc` | 关闭指定路径的 ABC 会话并释放其 xref/类层次索引缓存 |
 
 #### HAP 包工具
 | Tool | 功能 |

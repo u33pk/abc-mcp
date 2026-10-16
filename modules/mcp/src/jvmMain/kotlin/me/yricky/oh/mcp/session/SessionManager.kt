@@ -30,6 +30,39 @@ class SessionManager {
     fun getOrOpen(path: String): AbcBuf = get(path) ?: open(path)
 
     /**
+     * 打开会话信息，供 list_sessions 展示
+     */
+    data class SessionInfo(
+        val path: String,
+        val classCount: Int,
+        val hasXRefIndex: Boolean,
+        val hasHierarchyIndex: Boolean
+    )
+
+    /**
+     * 关闭指定路径的会话，释放其 xref / 类层次索引缓存。
+     * @return 是否存在并已关闭该会话
+     */
+    fun close(path: String): Boolean {
+        val removed = sessions.remove(path) != null
+        xrefIndexes.remove(path)
+        hierarchyIndexes.remove(path)
+        return removed
+    }
+
+    /**
+     * 列出所有打开的会话（仅读取文件头信息，不触发类解析）
+     */
+    fun listSessions(): List<SessionInfo> = sessions.map { (path, abc) ->
+        SessionInfo(
+            path = path,
+            classCount = abc.header.numClasses,
+            hasXRefIndex = xrefIndexes.containsKey(path),
+            hasHierarchyIndex = hierarchyIndexes.containsKey(path)
+        )
+    }
+
+    /**
      * 获取指定 ABC 文件的交叉引用索引。
      * 索引会懒加载并缓存，首次调用会扫描全库方法调用关系。
      */
