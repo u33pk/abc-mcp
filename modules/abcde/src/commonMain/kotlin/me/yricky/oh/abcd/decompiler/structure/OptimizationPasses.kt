@@ -907,26 +907,32 @@ object ExpressionPropagationPass : OptimizationPass {
     
     /**
      * 内联表达式中的 LoadReg
+     *
+     * @param inliningRegs 当前内联路径上已展开的寄存器集合。
+     * 自引用映射（如 `_acc_ = _acc_ + _acc_`）会使内联沿环无限展开，
+     * 路径上重复出现的寄存器不再内联，保持为符号引用。
      */
     private fun inlineExpression(
         expr: IrOp.Expression,
         exprMap: Map<FunSimCtx.RegId, IrOp.Expression>,
-        depth: Int = 0
+        depth: Int = 0,
+        inliningRegs: Set<FunSimCtx.RegId> = emptySet()
     ): IrOp.Expression {
         if (depth > 50) return expr
         return when (expr) {
             is IrOp.LoadReg -> {
                 val mapped = exprMap[expr.regId]
-                if (mapped != null && expressionComplexity(mapped) <= MAX_INLINE_COMPLEXITY) {
+                if (mapped != null && expr.regId !in inliningRegs &&
+                    expressionComplexity(mapped) <= MAX_INLINE_COMPLEXITY) {
                     // 内联表达式
-                    inlineExpression(mapped, exprMap, depth + 1)
+                    inlineExpression(mapped, exprMap, depth + 1, inliningRegs + expr.regId)
                 } else {
                     expr
                 }
             }
             is IrOp.ObjField.Name -> {
                 // 内联 obj 表达式
-                val inlinedObj = inlineExpression(expr.obj, exprMap, depth + 1)
+                val inlinedObj = inlineExpression(expr.obj, exprMap, depth + 1, inliningRegs)
                 if (inlinedObj != expr.obj) {
                     IrOp.ObjField.Name(inlinedObj, expr.name)
                 } else {
@@ -935,7 +941,7 @@ object ExpressionPropagationPass : OptimizationPass {
             }
             is IrOp.ObjField.Index -> {
                 // 内联 obj 表达式
-                val inlinedObj = inlineExpression(expr.obj, exprMap, depth + 1)
+                val inlinedObj = inlineExpression(expr.obj, exprMap, depth + 1, inliningRegs)
                 if (inlinedObj != expr.obj) {
                     IrOp.ObjField.Index(inlinedObj, expr.index)
                 } else {
@@ -944,7 +950,7 @@ object ExpressionPropagationPass : OptimizationPass {
             }
             is IrOp.ObjField.Value -> {
                 // 内联 obj 和 value
-                val inlinedObj = inlineExpression(expr.obj, exprMap, depth + 1)
+                val inlinedObj = inlineExpression(expr.obj, exprMap, depth + 1, inliningRegs)
                 val newValue = resolveReg(expr.value, exprMap)
                 if (inlinedObj != expr.obj || newValue != expr.value) {
                     IrOp.ObjField.Value(inlinedObj, newValue)
@@ -965,7 +971,7 @@ object ExpressionPropagationPass : OptimizationPass {
             }
             is IrOp.CallWithTarget -> {
                 // 内联 target
-                val newTarget = inlineExpression(expr.target, exprMap, depth + 1)
+                val newTarget = inlineExpression(expr.target, exprMap, depth + 1, inliningRegs)
                 // 内联 overrideThis
                 val newThis = expr.overrideThis?.let { reg -> resolveReg(reg, exprMap) }
                 // 内联 args
@@ -1003,8 +1009,8 @@ object ExpressionPropagationPass : OptimizationPass {
                 }
             }
             is IrOp.BiExp -> {
-                val newL = inlineExpression(expr.l, exprMap, depth + 1)
-                val newR = inlineExpression(expr.r, exprMap, depth + 1)
+                val newL = inlineExpression(expr.l, exprMap, depth + 1, inliningRegs)
+                val newR = inlineExpression(expr.r, exprMap, depth + 1, inliningRegs)
                 if (newL != expr.l || newR != expr.r) {
                     when (expr) {
                         is IrOp.BiExp.Add -> IrOp.BiExp.Add(newL, newR)
@@ -1033,7 +1039,7 @@ object ExpressionPropagationPass : OptimizationPass {
                 } else expr
             }
             is IrOp.UaExp -> {
-                val newS = inlineExpression(expr.source, exprMap, depth + 1)
+                val newS = inlineExpression(expr.source, exprMap, depth + 1, inliningRegs)
                 if (newS != expr.source) {
                     when (expr) {
                         is IrOp.UaExp.Neg -> IrOp.UaExp.Neg(newS)

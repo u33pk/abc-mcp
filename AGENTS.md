@@ -388,6 +388,7 @@ _acc_ = AtkTsGlobal.print(_acc_);
 - ✅ HAP `module.json` / `obfuscation.map` JSON 解析兼容性：添加 `ignoreUnknownKeys = true`，支持 Kazumi HAP 中的额外字段（如 `iconId`）
 - ✅ `open_hap` 资源解析异常处理：捕获 `Throwable`，避免不兼容 `resources.index` 导致 OOM 崩溃
 - ✅ `HapSignBlocks` 整数溢出修复：大 HAP 文件（>2GB 偏移）的签名块解析 `.toInt()` 溢出导致 `Range out of bounds` 错误，新增 Long 范围检查
+- ✅ `ExpressionPropagationPass.inlineExpression` 自引用映射指数展开卡死：`run()` 将内联结果存回 `exprMap` 会产生自引用映射（如 `_acc_ = _acc_ + _acc_`，async 状态机/字符串累加器场景常见），内联沿环按深度上限 50 指数展开（分支因子 2 时约 2^25 节点），且每个后续引用点重复爆炸，导致 `decompile_method` 在普通 async 方法上卡死至 MCP 超时（如 AdminProvisioning 的 `BaseAutoDeployAbility.onSessionCreate`，132 指令）。修复：新增路径级循环检测 `inliningRegs`（机制与同文件 `resolveReg` 的 visited 一致），内联路径上重复出现的寄存器保持为符号引用；新增 `ExpressionPropagationCycleTest`（自引用终止、部分环保留非环内联、无环链不受影响 3 个用例）
 
 ### 未实现指令
 
